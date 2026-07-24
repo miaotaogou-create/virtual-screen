@@ -1,32 +1,27 @@
 # virtual-screen
 
-一个绿色便携程序：**拷贝 `dist/VirtualScreen.exe` 到任意 Windows 机器双击即可**，无需安装 Python，无需 `.bat`。
+**一个绿色 `VirtualScreen.exe`，拷走双击即可**（不装 Python、不用 bat、不依赖 Tcl/Tk）。
 
-用于在没有对应物理显示器时，造系统级虚拟屏（任意分辨率 / 缩放），并把画面缩小预览出来，方便测双屏 UI 布局。
+打开后自动弹出浏览器本地页，用来配置虚拟屏分辨率/缩放、安装驱动、预览画面。
 
 ## 怎么用
 
-1. 双击 `VirtualScreen.exe`
-2. 若尚未装驱动：点 **安装驱动**（弹 UAC → 确认）
-3. 填两块屏的宽×高、缩放 → **应用**（会弹 UAC）
-4. 把被测程序窗口拖到虚拟屏上，在本窗口看预览
-5. 不用了点 **清除虚拟屏**
+1. 双击 `dist\VirtualScreen.exe`（浏览器会打开控制页）
+2. 未装驱动时点 **安装驱动**（弹 UAC）
+3. 填宽×高、缩放 → **应用**（弹 UAC）
+4. 把被测程序拖到虚拟屏，在页面里看预览
+5. **清除虚拟屏** / **退出程序**
 
-`config.json` 会生成在 **exe 同目录**（可一起拷走）。
+`config.json` 生成在 **exe 同目录**。
 
 ## 说明
 
-- 系统虚拟屏依赖上游 [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)；exe 内已集成一键下载安装，不内嵌驱动二进制。
-- 应用 / 清除 / 装驱动需要管理员（程序内自动弹 UAC）。
-- 预览不需要管理员。
-- 不是完整硬件仿真；DPI 偶发失败时可在系统「显示」里手动设缩放。
+- 系统虚拟屏仍用上游 [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)；安装/应用/清除在程序内完成并自动提权。
+- UI 是本机 `127.0.0.1` 网页（标准库 HTTP），打包不带 tkinter，避免 Tcl 绿色包问题。
+- 不是完整硬件仿真。
 
-## 重新打包（维护用）
-
-需本机 Python 3.12（带 Tcl/Tk）：
+## 重打包
 
 ```text
 scripts\build_exe.bat
 ```
-
-输出仍是单个 `dist\VirtualScreen.exe`。
