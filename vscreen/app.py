@@ -1,417 +1,253 @@
 from __future__ import annotations
 
-import json
-import socket
-import struct
 import sys
-import threading
-import time
-import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+import tkinter as tk
+from tkinter import messagebox, ttk
 from typing import Any
-from urllib.parse import urlparse
 
 from . import __version__, config as cfgmod
 from . import elevate, vdd, win_display
 
-HOST = "127.0.0.1"
-PORT_BASE = 17832
 
+class App(tk.Tk):
+    def __init__(self, startup_action: str | None = None) -> None:
+        super().__init__()
+        self.title(f"虚拟屏 VirtualScreen {__version__}")
+        self.geometry("1100x720")
+        self.minsize(900, 600)
 
-def rgb_to_bmp(rgb: bytes, w: int, h: int) -> bytes:
-    """RGB24 → BMP（无第三方库）。"""
-    row = (w * 3 + 3) & ~3
-    pad = row - w * 3
-    pixel = bytearray()
-    for y in range(h - 1, -1, -1):
-        i = y * w * 3
-        for x in range(w):
-            r, g, b = rgb[i], rgb[i + 1], rgb[i + 2]
-            pixel.extend((b, g, r))
-            i += 3
-        pixel.extend(b"\x00" * pad)
-    file_header = struct.pack("<2sIHHI", b"BM", 54 + len(pixel), 0, 0, 54)
-    info_header = struct.pack(
-        "<IiiHHIIiiii",
-        40,
-        w,
-        h,
-        1,
-        24,
-        0,
-        len(pixel),
-        2835,
-        2835,
-        0,
-        0,
-    )
-    return file_header + info_header + pixel
+        self.cfg: dict[str, Any] = cfgmod.load_config()
+        self._photos: list[tk.PhotoImage] = []
+        self._preview_job: str | None = None
 
+        self._build()
+        self._load_fields_from_cfg()
+        self._tick_preview()
+        if startup_action:
+            self.after(200, lambda: self._run_startup_action(startup_action))
 
-INDEX_HTML = r"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>虚拟屏 VirtualScreen</title>
-<style>
-  :root { --bg:#0f1419; --card:#1a2332; --fg:#e7ecf3; --mut:#8b9bb4; --acc:#3d8bfd; --ok:#3dd68c; --bad:#ff6b6b; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:14px/1.45 system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
-  header { padding:16px 20px; border-bottom:1px solid #243044; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  h1 { margin:0; font-size:18px; font-weight:600; }
-  .pill { font-size:12px; color:var(--mut); padding:2px 8px; border:1px solid #31425c; border-radius:999px; }
-  .pill.ok { color:var(--ok); border-color:#245c45; }
-  .pill.bad { color:var(--bad); border-color:#6b2e2e; }
-  main { padding:16px 20px 32px; display:grid; gap:16px; }
-  .card { background:var(--card); border:1px solid #243044; border-radius:10px; padding:14px; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }
-  label { color:var(--mut); min-width:42px; }
-  input { background:#0f1419; border:1px solid #31425c; color:var(--fg); border-radius:6px; padding:6px 8px; width:90px; }
-  input.wide { width:120px; }
-  button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font-weight:600; }
-  button.secondary { background:#31425c; }
-  button.danger { background:#a33b3b; }
-  button:disabled { opacity:.5; cursor:wait; }
-  #status { color:var(--mut); white-space:pre-wrap; }
-  #monitors { color:var(--mut); white-space:pre-wrap; font-family:ui-monospace, Consolas, monospace; font-size:12px; }
-  .previews { display:flex; gap:12px; flex-wrap:wrap; }
-  .previews figure { margin:0; }
-  .previews img { max-height:320px; background:#000; border:1px solid #31425c; border-radius:6px; display:block; }
-  .previews figcaption { color:var(--mut); font-size:12px; margin-top:4px; }
-</style>
-</head>
-<body>
-<header>
-  <h1>虚拟屏 VirtualScreen</h1>
-  <span id="ver" class="pill"></span>
-  <span id="admin" class="pill"></span>
-  <span id="driver" class="pill"></span>
-</header>
-<main>
-  <section class="card">
-    <div id="displays"></div>
-    <div class="row" style="margin-top:12px">
-      <button id="btnApply">应用</button>
-      <button id="btnClear" class="danger">清除虚拟屏</button>
-      <button id="btnInstall" class="secondary">安装驱动</button>
-      <button id="btnSave" class="secondary">保存配置</button>
-      <button id="btnRefresh" class="secondary">刷新</button>
-      <button id="btnQuit" class="secondary">退出程序</button>
-    </div>
-    <p id="status"></p>
-  </section>
-  <section class="card">
-    <div class="previews" id="previews"></div>
-  </section>
-  <section class="card">
-    <div id="monitors"></div>
-  </section>
-</main>
-<script>
-let state = null;
-const $ = (id) => document.getElementById(id);
-
-async function api(path, opts) {
-  const r = await fetch(path, opts);
-  const t = await r.text();
-  let j; try { j = JSON.parse(t); } catch { throw new Error(t || r.statusText); }
-  if (!r.ok) throw new Error(j.error || t);
-  return j;
-}
-
-function renderDisplays() {
-  const box = $("displays");
-  box.innerHTML = "";
-  (state.config.displays || []).forEach((d, i) => {
-    const div = document.createElement("div");
-    div.className = "row";
-    div.innerHTML = `
-      <strong>#${i+1}</strong>
-      <label>label</label><input class="wide" data-i="${i}" data-k="label" value="${d.label||""}"/>
-      <label>width</label><input data-i="${i}" data-k="width" value="${d.width}"/>
-      <label>height</label><input data-i="${i}" data-k="height" value="${d.height}"/>
-      <label>scale</label><input data-i="${i}" data-k="scale" value="${d.scale}"/>
-      <label>hz</label><input data-i="${i}" data-k="hz" value="${d.hz}"/>`;
-    box.appendChild(div);
-  });
-}
-
-function readDisplays() {
-  const out = (state.config.displays || []).map((d) => ({...d}));
-  document.querySelectorAll("#displays input").forEach((el) => {
-    const i = +el.dataset.i, k = el.dataset.k;
-    out[i][k] = (k === "label") ? el.value : parseInt(el.value, 10);
-  });
-  return out;
-}
-
-function renderMonitors() {
-  const lines = ["当前监视器："];
-  (state.monitors || []).forEach((m) => {
-    const tag = [];
-    if (m.is_primary) tag.push("主屏");
-    if (m.likely_virtual) tag.push("疑似虚拟");
-    if (!m.is_primary && !m.likely_virtual) tag.push("副屏");
-    lines.push(`- ${m.device_name}  ${m.width}x${m.height}+${m.left},${m.top}  ${m.adapter_name||m.monitor_name}  [${tag.join(",")||"普通"}]`);
-  });
-  $("monitors").textContent = lines.join("\n");
-}
-
-function renderPreviews() {
-  const box = $("previews");
-  box.innerHTML = "";
-  const n = (state.preview_count || 0);
-  const ts = Date.now();
-  for (let i = 0; i < n; i++) {
-    const fig = document.createElement("figure");
-    fig.innerHTML = `<img src="/api/preview/${i}.bmp?t=${ts}" alt="preview ${i}"/><figcaption>预览 #${i+1}</figcaption>`;
-    box.appendChild(fig);
-  }
-  if (!n) box.textContent = "没有可预览的监视器";
-}
-
-async function refresh() {
-  state = await api("/api/state");
-  $("ver").textContent = "v" + state.version;
-  $("admin").textContent = state.admin ? "管理员" : "普通权限（操作会弹 UAC）";
-  $("admin").className = "pill " + (state.admin ? "ok" : "");
-  $("driver").textContent = state.driver ? "驱动已就绪" : "未检测到驱动";
-  $("driver").className = "pill " + (state.driver ? "ok" : "bad");
-  $("status").textContent = state.message || "";
-  renderDisplays();
-  renderMonitors();
-  renderPreviews();
-}
-
-async function withBusy(btn, fn) {
-  const buttons = [...document.querySelectorAll("button")];
-  buttons.forEach(b => b.disabled = true);
-  try { await fn(); }
-  catch (e) { $("status").textContent = "失败: " + e.message; alert(e.message); }
-  finally { buttons.forEach(b => b.disabled = false); }
-}
-
-$("btnRefresh").onclick = () => withBusy($("btnRefresh"), refresh);
-$("btnSave").onclick = () => withBusy($("btnSave"), async () => {
-  const displays = readDisplays();
-  const j = await api("/api/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({displays}) });
-  $("status").textContent = j.message || "已保存";
-  await refresh();
-});
-$("btnApply").onclick = () => withBusy($("btnApply"), async () => {
-  const displays = readDisplays();
-  await api("/api/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({displays}) });
-  const j = await api("/api/apply", { method:"POST" });
-  if (j.elevating) { $("status").textContent = "已请求管理员权限，请在 UAC 确认…"; return; }
-  $("status").textContent = j.message || "完成";
-  alert(j.message || "完成");
-  await refresh();
-});
-$("btnClear").onclick = () => withBusy($("btnClear"), async () => {
-  if (!confirm("禁用虚拟显示驱动设备？")) return;
-  const j = await api("/api/clear", { method:"POST" });
-  if (j.elevating) { $("status").textContent = "已请求管理员权限，请在 UAC 确认…"; return; }
-  $("status").textContent = j.message || "完成";
-  alert(j.message || "完成");
-  await refresh();
-});
-$("btnInstall").onclick = () => withBusy($("btnInstall"), async () => {
-  if (!confirm("下载并安装 Virtual Display Driver？需要管理员权限。")) return;
-  const j = await api("/api/install-driver", { method:"POST" });
-  if (j.elevating) { $("status").textContent = "已请求管理员权限，请在 UAC 确认…"; return; }
-  $("status").textContent = j.message || "完成";
-  alert(j.message || "完成");
-  await refresh();
-});
-$("btnQuit").onclick = () => api("/api/quit", { method:"POST" }).then(() => { document.body.innerHTML = "<p style='padding:24px'>程序已退出，可关闭此页。</p>"; });
-
-refresh();
-setInterval(() => { if (state) renderPreviews(); }, 2000);
-</script>
-</body>
-</html>
-"""
-
-
-class AppState:
-    def __init__(self) -> None:
-        self.cfg = cfgmod.load_config()
-        self.message = ""
-        self.server: ThreadingHTTPServer | None = None
-
-
-STATE = AppState()
-
-
-def _json_response(handler: BaseHTTPRequestHandler, code: int, obj: Any) -> None:
-    data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
-    handler.send_response(code)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(data)))
-    handler.send_header("Cache-Control", "no-store")
-    handler.end_headers()
-    handler.wfile.write(data)
-
-
-def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    n = int(handler.headers.get("Content-Length") or 0)
-    raw = handler.rfile.read(n) if n else b"{}"
-    return json.loads(raw.decode("utf-8") or "{}")
-
-
-def _elevate(action: str) -> dict[str, Any]:
-    if elevate.is_admin():
-        return {"elevating": False}
-    if not elevate.relaunch_as_admin([f"--{action}"]):
-        raise RuntimeError("无法弹出 UAC，或用户已取消")
-    # 提权成功后结束当前普通权限进程
-    threading.Thread(target=lambda: (time.sleep(0.3), _shutdown()), daemon=True).start()
-    return {"elevating": True}
-
-
-def _shutdown() -> None:
-    if STATE.server:
-        threading.Thread(target=STATE.server.shutdown, daemon=True).start()
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt: str, *args) -> None:  # noqa: A003
-        return
-
-    def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        try:
-            if path in ("/", "/index.html"):
-                data = INDEX_HTML.encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                return
-            if path == "/api/state":
-                mons = [m.__dict__ for m in win_display.list_monitors()]
-                targets = win_display.preview_targets(prefer_virtual=True)
-                _json_response(
-                    self,
-                    200,
-                    {
-                        "version": __version__,
-                        "admin": elevate.is_admin(),
-                        "driver": vdd.vdd_installed(),
-                        "config": STATE.cfg,
-                        "monitors": mons,
-                        "preview_count": len(targets),
-                        "message": STATE.message or (
-                            "驱动已就绪。改完分辨率/缩放后点「应用」。"
-                            if vdd.vdd_installed()
-                            else "未检测到驱动：先点「安装驱动」。"
-                        ),
-                    },
-                )
-                return
-            if path.startswith("/api/preview/") and path.endswith(".bmp"):
-                idx_s = path[len("/api/preview/") : -4]
-                idx = int(idx_s)
-                targets = win_display.preview_targets(prefer_virtual=True)
-                if idx < 0 or idx >= len(targets):
-                    self.send_error(404)
-                    return
-                mon = targets[idx]
-                max_h = max(80, int(STATE.cfg.get("preview_max_height", 320)))
-                scale = min(1.0, max_h / max(1, mon.height))
-                out_w = max(1, int(mon.width * scale))
-                out_h = max(1, int(mon.height * scale))
-                rgb = win_display.capture_monitor_rgb(mon, out_w, out_h)
-                data = rgb_to_bmp(rgb, out_w, out_h)
-                self.send_response(200)
-                self.send_header("Content-Type", "image/bmp")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(data)
-                return
-            self.send_error(404)
-        except Exception as e:
-            _json_response(self, 500, {"error": str(e)})
-
-    def do_POST(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        try:
-            if path == "/api/config":
-                body = _read_json(self)
-                cfg = dict(STATE.cfg)
-                cfg["displays"] = body.get("displays") or cfg.get("displays")
-                errs = cfgmod.validate_config(cfg)
-                if errs:
-                    _json_response(self, 400, {"error": "\n".join(errs)})
-                    return
-                cfgmod.save_config(cfg)
-                STATE.cfg = cfg
-                _json_response(self, 200, {"message": "配置已保存到 exe 同目录 config.json"})
-                return
-            if path == "/api/apply":
-                elev = _elevate("apply")
-                if elev.get("elevating"):
-                    _json_response(self, 200, elev)
-                    return
-                msg = vdd.apply_config(STATE.cfg)
-                STATE.message = msg
-                _json_response(self, 200, {"message": msg})
-                return
-            if path == "/api/clear":
-                elev = _elevate("clear")
-                if elev.get("elevating"):
-                    _json_response(self, 200, elev)
-                    return
-                msg = vdd.clear_virtual_displays()
-                STATE.message = msg
-                _json_response(self, 200, {"message": msg})
-                return
-            if path == "/api/install-driver":
-                elev = _elevate("install-driver")
-                if elev.get("elevating"):
-                    _json_response(self, 200, elev)
-                    return
-                msg = vdd.install_driver()
-                STATE.message = msg
-                _json_response(self, 200, {"message": msg})
-                return
-            if path == "/api/quit":
-                _json_response(self, 200, {"message": "bye"})
-                _shutdown()
-                return
-            self.send_error(404)
-        except Exception as e:
-            _json_response(self, 500, {"error": str(e)})
-
-
-def _free_port() -> int:
-    for port in range(PORT_BASE, PORT_BASE + 30):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind((HOST, port))
-                return port
-            except OSError:
-                continue
-    raise RuntimeError("找不到可用本地端口")
-
-
-def _run_startup_action(action: str | None) -> None:
-    if not action:
-        return
-    try:
+    def _run_startup_action(self, action: str) -> None:
         if action == "install-driver":
-            STATE.message = vdd.install_driver()
+            self.on_install_driver(already_elevated=True)
         elif action == "apply":
-            STATE.cfg = cfgmod.load_config()
-            STATE.message = vdd.apply_config(STATE.cfg)
+            self.on_apply(already_elevated=True)
         elif action == "clear":
-            STATE.message = vdd.clear_virtual_displays()
-    except Exception as e:
-        STATE.message = f"{action} 失败: {e}"
+            self.on_clear(already_elevated=True)
+
+    def _build(self) -> None:
+        top = ttk.Frame(self, padding=8)
+        top.pack(fill=tk.X)
+
+        admin = "管理员" if elevate.is_admin() else "普通权限（应用/清除/装驱动会弹 UAC）"
+        ttk.Label(top, text=f"虚拟屏配置（物理像素 × 缩放）  [{admin}]").pack(anchor=tk.W)
+        self.rows_frame = ttk.Frame(top)
+        self.rows_frame.pack(fill=tk.X, pady=4)
+        self.row_vars: list[dict[str, tk.Variable]] = []
+
+        btns = ttk.Frame(top)
+        btns.pack(fill=tk.X, pady=4)
+        ttk.Button(btns, text="应用", command=self.on_apply).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btns, text="清除虚拟屏", command=self.on_clear).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btns, text="安装驱动", command=self.on_install_driver).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btns, text="保存配置", command=self.on_save).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btns, text="刷新监视器列表", command=self.on_refresh_list).pack(side=tk.LEFT)
+
+        self.status = tk.StringVar(value=self._status_line())
+        ttk.Label(top, textvariable=self.status, wraplength=1060).pack(anchor=tk.W, pady=(4, 0))
+
+        mid = ttk.Frame(self, padding=8)
+        mid.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(mid, text="预览（优先抓虚拟屏；若无则抓非主屏，按比例缩小）").pack(anchor=tk.W)
+        self.preview_host = ttk.Frame(mid)
+        self.preview_host.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        self.list_box = tk.Text(self, height=6, wrap=tk.WORD)
+        self.list_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self.on_refresh_list()
+
+    def _status_line(self) -> str:
+        if vdd.vdd_installed():
+            return "驱动已就绪。改完分辨率/缩放后点「应用」。"
+        return "未检测到驱动：先点「安装驱动」（会弹 UAC），再「应用」。"
+
+    def _load_fields_from_cfg(self) -> None:
+        for child in self.rows_frame.winfo_children():
+            child.destroy()
+        self.row_vars.clear()
+        for i, d in enumerate(self.cfg.get("displays", [])):
+            fr = ttk.Frame(self.rows_frame)
+            fr.pack(fill=tk.X, pady=2)
+            ttk.Label(fr, text=f"#{i+1}", width=4).pack(side=tk.LEFT)
+            vars_map: dict[str, tk.Variable] = {}
+            for key, width, default in (
+                ("label", 10, f"屏{i+1}"),
+                ("width", 6, 1920),
+                ("height", 6, 1080),
+                ("scale", 5, 100),
+                ("hz", 4, 60),
+            ):
+                ttk.Label(fr, text=key).pack(side=tk.LEFT, padx=(6, 2))
+                v = tk.StringVar(value=str(d.get(key, default)))
+                ttk.Entry(fr, textvariable=v, width=width).pack(side=tk.LEFT)
+                vars_map[key] = v
+            self.row_vars.append(vars_map)
+
+    def _cfg_from_fields(self) -> dict[str, Any]:
+        displays = []
+        for vars_map in self.row_vars:
+            displays.append(
+                {
+                    "label": vars_map["label"].get().strip() or "屏",
+                    "width": int(vars_map["width"].get()),
+                    "height": int(vars_map["height"].get()),
+                    "scale": int(vars_map["scale"].get()),
+                    "hz": int(vars_map["hz"].get()),
+                }
+            )
+        out = dict(self.cfg)
+        out["displays"] = displays
+        return out
+
+    def _elevate_and_exit(self, action: str) -> None:
+        try:
+            if not elevate.relaunch_as_admin([f"--{action}"]):
+                messagebox.showerror("提权失败", "无法弹出 UAC，或用户已取消。")
+                return
+        except Exception as e:
+            messagebox.showerror("提权失败", str(e))
+            return
+        self.destroy()
+        sys.exit(0)
+
+    def on_save(self) -> None:
+        try:
+            cfg = self._cfg_from_fields()
+        except ValueError:
+            messagebox.showerror("配置错误", "宽/高/缩放/刷新率必须是整数")
+            return
+        errs = cfgmod.validate_config(cfg)
+        if errs:
+            messagebox.showerror("配置错误", "\n".join(errs))
+            return
+        cfgmod.save_config(cfg)
+        self.cfg = cfg
+        self.status.set("配置已保存到 exe 同目录 config.json。 " + self._status_line())
+
+    def on_install_driver(self, already_elevated: bool = False) -> None:
+        if not already_elevated and not elevate.is_admin():
+            if not messagebox.askyesno("安装驱动", "将下载并安装 Virtual Display Driver，需要管理员权限。继续？"):
+                return
+            self._elevate_and_exit("install-driver")
+            return
+        self.status.set("正在安装驱动，请稍候…")
+        self.update_idletasks()
+        try:
+            msg = vdd.install_driver()
+        except Exception as e:
+            messagebox.showerror("安装失败", str(e))
+            self.status.set(f"安装失败: {e}")
+            return
+        self.status.set(msg)
+        self.on_refresh_list()
+        messagebox.showinfo("安装驱动", msg)
+
+    def on_apply(self, already_elevated: bool = False) -> None:
+        try:
+            cfg = self._cfg_from_fields()
+        except ValueError:
+            messagebox.showerror("配置错误", "宽/高/缩放/刷新率必须是整数")
+            return
+        errs = cfgmod.validate_config(cfg)
+        if errs:
+            messagebox.showerror("配置错误", "\n".join(errs))
+            return
+        cfgmod.save_config(cfg)
+        self.cfg = cfg
+        if not already_elevated and not elevate.is_admin():
+            self._elevate_and_exit("apply")
+            return
+        try:
+            msg = vdd.apply_config(cfg)
+        except Exception as e:
+            messagebox.showerror("应用失败", str(e))
+            self.status.set(f"应用失败: {e}")
+            return
+        self.status.set(msg)
+        self.on_refresh_list()
+        messagebox.showinfo("应用", msg)
+
+    def on_clear(self, already_elevated: bool = False) -> None:
+        if not already_elevated:
+            if not messagebox.askyesno("清除", "禁用虚拟显示驱动设备？"):
+                return
+            if not elevate.is_admin():
+                self._elevate_and_exit("clear")
+                return
+        try:
+            msg = vdd.clear_virtual_displays()
+        except Exception as e:
+            messagebox.showerror("清除失败", str(e))
+            return
+        self.status.set(msg)
+        self.on_refresh_list()
+        messagebox.showinfo("清除", msg)
+
+    def on_refresh_list(self) -> None:
+        mons = win_display.list_monitors()
+        lines = ["当前监视器："]
+        for m in mons:
+            tag = []
+            if m.is_primary:
+                tag.append("主屏")
+            if m.likely_virtual:
+                tag.append("疑似虚拟")
+            if not m.is_primary and not m.likely_virtual:
+                tag.append("副屏")
+            lines.append(
+                f"- {m.device_name}  {m.width}x{m.height}+{m.left},{m.top}  "
+                f"{m.adapter_name or m.monitor_name}  [{','.join(tag) or '普通'}]"
+            )
+        lines.append("")
+        lines.append(self._status_line())
+        self.list_box.delete("1.0", tk.END)
+        self.list_box.insert(tk.END, "\n".join(lines))
+
+    def _tick_preview(self) -> None:
+        try:
+            self._draw_preview()
+        except Exception as e:
+            self.status.set(f"预览异常: {e}")
+        fps = max(1, int(self.cfg.get("preview_fps", 5)))
+        self._preview_job = self.after(int(1000 / fps), self._tick_preview)
+
+    def _draw_preview(self) -> None:
+        targets = win_display.preview_targets(prefer_virtual=True)
+        max_h = max(80, int(self.cfg.get("preview_max_height", 320)))
+        for child in self.preview_host.winfo_children():
+            child.destroy()
+        self._photos.clear()
+        if not targets:
+            ttk.Label(self.preview_host, text="没有可预览的监视器").pack()
+            return
+        for mon in targets:
+            scale = min(1.0, max_h / max(1, mon.height))
+            out_w = max(1, int(mon.width * scale))
+            out_h = max(1, int(mon.height * scale))
+            fr = ttk.Frame(self.preview_host, padding=4)
+            fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            title = f"{mon.device_name}  {mon.width}x{mon.height}"
+            if mon.likely_virtual:
+                title += "  (虚拟)"
+            ttk.Label(fr, text=title).pack(anchor=tk.W)
+            try:
+                rgb = win_display.capture_monitor_rgb(mon, out_w, out_h)
+                ppm = win_display.rgb_to_ppm(rgb, out_w, out_h)
+                img = tk.PhotoImage(data=ppm)
+            except Exception as e:
+                ttk.Label(fr, text=f"抓屏失败: {e}").pack()
+                continue
+            self._photos.append(img)
+            ttk.Label(fr, image=img).pack()
 
 
 def main() -> None:
@@ -420,22 +256,5 @@ def main() -> None:
         if f"--{a}" in sys.argv:
             action = a
             break
-    _run_startup_action(action)
-
-    port = _free_port()
-    STATE.server = ThreadingHTTPServer((HOST, port), Handler)
-    url = f"http://{HOST}:{port}/"
-    # 冒烟标记
-    try:
-        if getattr(sys, "frozen", False):
-            (Path(sys.executable).resolve().parent / "VirtualScreen-gui-ok.txt").write_text(
-                url + "\n", encoding="utf-8"
-            )
-    except Exception:
-        pass
-    threading.Thread(target=lambda: (time.sleep(0.4), webbrowser.open(url)), daemon=True).start()
-    print(f"VirtualScreen {__version__}  {url}")
-    try:
-        STATE.server.serve_forever()
-    finally:
-        STATE.server.server_close()
+    app = App(startup_action=action)
+    app.mainloop()
