@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent.parent
+
+def app_root() -> Path:
+    """便携 exe 旁目录；开发时用仓库根目录。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+ROOT = app_root()
 DEFAULT_CONFIG_PATH = ROOT / "config.json"
 EXAMPLE_CONFIG_PATH = ROOT / "config.example.json"
 

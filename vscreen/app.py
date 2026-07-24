@@ -166,12 +166,13 @@ class App(tk.Tk):
     def on_driver_help(self) -> None:
         messagebox.showinfo(
             "驱动安装",
-            "本工具依赖系统级 Virtual Display Driver（IddCx），不自带驱动。\n\n"
-            "1. 打开：https://github.com/VirtualDrivers/Virtual-Display-Driver/releases\n"
-            "2. 下载并安装签名版驱动（按上游说明）\n"
-            "3. 确认出现 C:\\VirtualDisplayDriver\\ 或设备管理器中有对应显示适配器\n"
-            "4. 以管理员运行本工具，再点「应用」\n\n"
-            "「清除」会 Disable 该 PnP 设备。预览不需要管理员。",
+            "本工具依赖系统级 Virtual Display Driver（IddCx）。\n\n"
+            "一键安装（会弹 UAC）：运行仓库里的 scripts\\install_vdd.bat\n\n"
+            "或打开上游发布页手动安装：\n"
+            "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases\n\n"
+            "装好后确认设备管理器有 Virtual Display Driver，\n"
+            "以及目录 C:\\VirtualDisplayDriver\\\n\n"
+            "「应用 / 清除」请以管理员运行本程序。预览不需要管理员。",
         )
 
     def _tick_preview(self) -> None:

@@ -5,3 +5,7 @@ venv/
 config.json
 *.ppm
 .DS_Store
+build/
+_vendor/
+*.spec
+
