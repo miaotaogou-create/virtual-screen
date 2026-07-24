@@ -7,7 +7,7 @@ from tkinter import messagebox, ttk
 from typing import Any, Callable
 
 from . import __version__, config as cfgmod
-from . import elevate, theme, vdd, win_display
+from . import chrome, elevate, theme, vdd, win_display
 
 
 class App(tk.Tk):
@@ -19,7 +19,6 @@ class App(tk.Tk):
         theme.apply_theme(self)
 
         self.cfg: dict[str, Any] = cfgmod.load_config()
-        # 预览默认更稳：2fps，避免整页闪烁感
         self.cfg.setdefault("preview_fps", 2)
 
         self._photos: list[tk.PhotoImage] = []
@@ -29,6 +28,7 @@ class App(tk.Tk):
         self._settings_open = False
         self._busy = False
         self.row_vars: list[dict[str, tk.Variable]] = []
+        self._chrome: chrome.TitleChrome | None = None
 
         self._build()
         self._load_fields_from_cfg()
@@ -45,24 +45,17 @@ class App(tk.Tk):
             self.on_clear(already_elevated=True)
 
     def _build(self) -> None:
-        # 顶栏：操作；参数进侧栏，预览占满
-        bar = ttk.Frame(self, style="Bar.TFrame", padding=(14, 10))
-        bar.pack(fill=tk.X)
-        ttk.Label(bar, text="VirtualScreen", style="Bar.TLabel").pack(side=tk.LEFT)
-        admin = "管理员" if elevate.is_admin() else "普通权限"
-        ttk.Label(bar, text=f"  ·  {admin}", style="BarMuted.TLabel").pack(side=tk.LEFT)
+        admin = "管理员" if elevate.is_admin() else "普通权限 · 应用/清除会弹 UAC"
+        self._chrome = chrome.TitleChrome(
+            self,
+            subtitle=admin,
+            on_apply=self.on_apply,
+            on_clear=self.on_clear,
+            on_settings=self.toggle_settings,
+            on_close=self.destroy,
+        )
+        self._chrome.build()
 
-        ttk.Button(bar, text="设置", style="Ghost.TButton", command=self.toggle_settings).pack(
-            side=tk.RIGHT, padx=(6, 0)
-        )
-        ttk.Button(bar, text="清除", style="Ghost.TButton", command=self.on_clear).pack(
-            side=tk.RIGHT, padx=(6, 0)
-        )
-        ttk.Button(bar, text="应用", style="Ghost.TButton", command=self.on_apply).pack(
-            side=tk.RIGHT, padx=(6, 0)
-        )
-
-        # 主体：预览全幅 + 可滑出的设置层
         self.body = ttk.Frame(self)
         self.body.pack(fill=tk.BOTH, expand=True)
 
@@ -70,7 +63,6 @@ class App(tk.Tk):
         self.preview_host.place(relx=0, rely=0, relwidth=1, relheight=1)
 
         self.settings_panel = ttk.Frame(self.body, style="Surface.TFrame", padding=16)
-        # 默认收起
 
         foot = ttk.Frame(self, padding=(14, 8))
         foot.pack(fill=tk.X)

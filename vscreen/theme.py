@@ -19,6 +19,7 @@ C = {
     "danger": "#B91C1C",
     "preview_bg": "#0B1220",
     "bar": "#0F766E",
+    "bar_deep": "#134E4A",
 }
 
 
