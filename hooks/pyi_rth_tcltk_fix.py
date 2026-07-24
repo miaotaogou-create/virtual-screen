@@ -1,30 +1,19 @@
-# PyInstaller 运行时：强制指向打包进 _MEIPASS 的 Tcl/Tk，避免找不到 init.tcl
+# PyInstaller 运行时：在 _MEIPASS 内递归查找 Tcl/Tk，再设置环境变量
 import os
 import sys
 
 
-def _pick(*cands: str) -> str | None:
-    for c in cands:
-        if c and os.path.isfile(os.path.join(c, "init.tcl")):
-            return c
-        # tk 目录是 tk.tcl 而不是 init.tcl
-        if c and os.path.isfile(os.path.join(c, "tk.tcl")):
-            return c
+def _find_file(root: str, name: str) -> str | None:
+    for dirpath, _dirs, files in os.walk(root):
+        if name in files:
+            return dirpath
     return None
 
 
 if getattr(sys, "frozen", False):
     base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-    tcl = _pick(
-        os.path.join(base, "_tcl_data"),
-        os.path.join(base, "tcl8.6"),
-        os.path.join(base, "tcl", "tcl8.6"),
-    )
-    tk = _pick(
-        os.path.join(base, "_tk_data"),
-        os.path.join(base, "tk8.6"),
-        os.path.join(base, "tcl", "tk8.6"),
-    )
+    tcl = _find_file(base, "init.tcl")
+    tk = _find_file(base, "tk.tcl")
     if tcl:
         os.environ["TCL_LIBRARY"] = tcl
     if tk:
