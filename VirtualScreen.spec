@@ -1,11 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""用 Python 3.12 打包单文件 VirtualScreen.exe，显式打入 tcl8.6 / tk8.6。"""
+"""单文件 VirtualScreen.exe：Tcl/Tk 必须放到 _tcl_data / _tk_data（与 PyInstaller 运行时钩子一致）。"""
 
 from pathlib import Path
 
 from PyInstaller.building.api import EXE, PYZ
 from PyInstaller.building.build_main import Analysis
-from PyInstaller.utils.hooks import collect_dynamic_libs
 
 ROOT = Path(SPECPATH).resolve()
 PY_BASE = Path(r"C:\Users\49358\AppData\Local\Programs\Python\Python312")
@@ -17,16 +16,17 @@ if not (TCL86 / "init.tcl").is_file():
 if not (TK86 / "tk.tcl").is_file():
     raise SystemExit(f"找不到 Tk: {TK86}")
 
+# 目录名必须叫 _tcl_data / _tk_data，否则 pyi_rth__tkinter 会指到空目录
 datas = [
-    (str(TCL86), "tcl8.6"),
-    (str(TK86), "tk8.6"),
+    (str(TCL86), "_tcl_data"),
+    (str(TK86), "_tk_data"),
     (str(ROOT / "config.example.json"), "."),
 ]
 
 a = Analysis(
     [str(ROOT / "launch.py")],
     pathex=[str(ROOT)],
-    binaries=collect_dynamic_libs("tkinter"),
+    binaries=[],
     datas=datas,
     hiddenimports=[],
     hookspath=[],
@@ -49,12 +49,6 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
 )
