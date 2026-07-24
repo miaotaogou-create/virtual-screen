@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.request
@@ -11,13 +12,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from . import win_display
 
-VDD_DEVICE_MATCH = (
-    "Virtual Display Driver",
-    "IddSampleDriver",
-    "MttVDD",
-    "VDD by MTT",
-    "Indirect Display",
-)
+# Windows：隐藏子进程控制台，避免双击后闪黑框
+_CREATE_NO_WINDOW = 0x08000000
 
 NEFCON_URL = "https://github.com/nefarius/nefcon/releases/download/v1.14.0/nefcon_v1.14.0.zip"
 DRIVER_URL = (
@@ -25,17 +21,28 @@ DRIVER_URL = (
     "25.7.23/VirtualDisplayDriver-x86.Driver.Only.zip"
 )
 
+_device_cache: list[dict] | None = None
+_device_cache_at = 0.0
+
+
+def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    kwargs.setdefault("capture_output", True)
+    kwargs.setdefault("text", True)
+    kwargs.setdefault("encoding", "utf-8")
+    kwargs.setdefault("errors", "replace")
+    kwargs.setdefault("check", False)
+    kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | _CREATE_NO_WINDOW
+    return subprocess.run(cmd, **kwargs)
+
 
 def write_vdd_settings(path: Path, displays: list[dict]) -> None:
-    """写入 VDD 的 vdd_settings.xml（count + 分辨率表）。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     root = Element("vdd_settings")
     monitors = SubElement(root, "monitors")
     SubElement(monitors, "count").text = str(len(displays))
 
     global_el = SubElement(root, "global")
-    hz_set = sorted({int(d.get("hz", 60)) for d in displays})
-    for hz in hz_set:
+    for hz in sorted({int(d.get("hz", 60)) for d in displays}):
         SubElement(global_el, "g_refresh_rate").text = str(hz)
 
     resolutions = SubElement(root, "resolutions")
@@ -55,13 +62,15 @@ def write_vdd_settings(path: Path, displays: list[dict]) -> None:
     SubElement(options, "PreventSpoof").text = "true"
     SubElement(options, "HardwareCursor").text = "true"
     SubElement(options, "logging").text = "false"
-
-    xml = tostring(root, encoding="utf-8", xml_declaration=True)
-    path.write_bytes(xml)
+    path.write_bytes(tostring(root, encoding="utf-8", xml_declaration=True))
 
 
-def find_vdd_devices() -> list[dict]:
-    """用 PowerShell 枚举疑似 VDD 的 PnP 设备。"""
+def find_vdd_devices(*, force: bool = False) -> list[dict]:
+    global _device_cache, _device_cache_at
+    now = time.time()
+    if not force and _device_cache is not None and now - _device_cache_at < 8:
+        return _device_cache
+
     ps = r"""
 $names = @('Virtual Display Driver','IddSampleDriver','MttVDD','VDD','Indirect Display Driver')
 Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
@@ -70,52 +79,40 @@ Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
   $false
 } | Select-Object Status, Class, FriendlyName, InstanceId | ConvertTo-Json -Compress
 """
-    r = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    r = _run(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
     out = (r.stdout or "").strip()
     if not out:
+        _device_cache, _device_cache_at = [], now
         return []
-    import json
-
     data = json.loads(out)
     if isinstance(data, dict):
-        return [data]
-    return list(data)
+        data = [data]
+    _device_cache, _device_cache_at = list(data), now
+    return _device_cache
 
 
 def vdd_installed() -> bool:
-    if find_vdd_devices():
+    if Path(r"C:\VirtualDisplayDriver").is_dir():
         return True
-    return Path(r"C:\VirtualDisplayDriver").is_dir()
+    if any(m.likely_virtual for m in win_display.list_monitors()):
+        return True
+    return bool(find_vdd_devices())
 
 
 def _pnp_set_enabled(instance_id: str, enabled: bool) -> None:
+    global _device_cache_at
     cmd = "Enable-PnpDevice" if enabled else "Disable-PnpDevice"
     ps = f'{cmd} -InstanceId "{instance_id}" -Confirm:$false'
-    r = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    r = _run(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout or f"{cmd} 失败").strip())
+    _device_cache_at = 0
 
 
 def restart_vdd_devices() -> int:
-    devices = find_vdd_devices()
+    devices = find_vdd_devices(force=True)
     if not devices:
-        raise RuntimeError(
-            "未检测到 Virtual Display Driver。请先点「安装驱动」，再点「应用」。"
-        )
+        raise RuntimeError("未检测到 Virtual Display Driver。请先点「安装驱动」，再点「应用」。")
     n = 0
     for d in devices:
         iid = d.get("InstanceId")
@@ -133,7 +130,7 @@ def restart_vdd_devices() -> int:
 
 
 def disable_vdd_devices() -> int:
-    devices = find_vdd_devices()
+    devices = find_vdd_devices(force=True)
     n = 0
     for d in devices:
         iid = d.get("InstanceId")
@@ -169,7 +166,7 @@ def apply_config(cfg: dict) -> str:
     if len(virtuals) < len(displays):
         return (
             f"已写入 {path} 并重启 {n_dev} 个驱动设备，但只看到 {len(virtuals)} 块副屏"
-            f"（期望 {len(displays)}）。可在「设置 → 系统 → 显示」里确认，或稍后看预览。"
+            f"（期望 {len(displays)}）。可在系统显示设置里确认。"
         )
 
     primary = next((m for m in win_display.list_monitors() if m.is_primary), None)
@@ -189,19 +186,19 @@ def apply_config(cfg: dict) -> str:
     for mon, spec in zip(virtuals2, displays):
         try:
             win_display.set_dpi_scale(mon.device_name, int(spec["scale"]))
-        except Exception as e:  # ponytail: DPI API 因系统/驱动而异，失败不阻断分辨率
+        except Exception as e:  # ponytail: DPI 因系统而异
             dpi_notes.append(f"{mon.device_name}: {e}")
 
     msg = f"已应用 {len(displays)} 块虚拟屏（驱动设备 {n_dev}）。"
     if dpi_notes:
-        msg += " 部分缩放未生效（可在系统显示设置里手动设）：" + "；".join(dpi_notes)
+        msg += " 部分缩放未生效，可在系统显示设置里手动设。"
     return msg
 
 
 def clear_virtual_displays() -> str:
     n = disable_vdd_devices()
     if n == 0:
-        return "未找到可禁用的虚拟显示设备（可能尚未安装驱动，或名称不匹配）。"
+        return "未找到可禁用的虚拟显示设备。"
     return f"已禁用 {n} 个虚拟显示设备。"
 
 
@@ -211,7 +208,6 @@ def _download(url: str, dest: Path) -> None:
 
 
 def install_driver() -> str:
-    """下载上游签名驱动并用 nefcon 静默安装。需管理员。"""
     from .elevate import is_admin
 
     if not is_admin():
@@ -236,7 +232,6 @@ def install_driver() -> str:
             raise RuntimeError("压缩包内找不到 MttVDD.inf")
         driver_dir = infs[0].parent
 
-        # 导入 cat 证书到 TrustedPublisher
         cats = list(driver_dir.glob("*.cat"))
         if cats:
             ps = (
@@ -251,32 +246,16 @@ def install_driver() -> str:
                 "Import-Certificate -FilePath $p -CertStoreLocation Cert:\\LocalMachine\\TrustedPublisher | Out-Null"
                 "}"
             )
-            subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps],
-                check=False,
-                capture_output=True,
-            )
+            _run(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
 
-        r = subprocess.run(
-            [str(nefcon), "install", str(infs[0]), r"Root\MttVDD"],
-            cwd=str(driver_dir),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        r = _run([str(nefcon), "install", str(infs[0]), r"Root\MttVDD"], cwd=str(driver_dir))
         time.sleep(8)
         Path(r"C:\VirtualDisplayDriver").mkdir(parents=True, exist_ok=True)
+        global _device_cache_at
+        _device_cache_at = 0
         if not vdd_installed():
             detail = (r.stderr or r.stdout or "").strip()
             raise RuntimeError(f"安装后仍未检测到设备。nefcon={r.returncode} {detail}")
         return "Virtual Display Driver 安装完成。"
     finally:
-        # ponytail: 临时目录清理失败可忽略，下次重启 TEMP 会扫
-        try:
-            import shutil
-
-            shutil.rmtree(tmp, ignore_errors=True)
-        except Exception:
-            pass
+        shutil.rmtree(tmp, ignore_errors=True)

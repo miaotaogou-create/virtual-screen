@@ -15,7 +15,7 @@
       "label": "虚拟屏2"
     }
   ],
-  "preview_max_height": 320,
-  "preview_fps": 5,
+  "preview_max_height": 900,
+  "preview_fps": 2,
   "vdd_settings_path": "C:\\VirtualDisplayDriver\\vdd_settings.xml"
 }

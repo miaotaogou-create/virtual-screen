@@ -6,19 +6,27 @@ from tkinter import messagebox, ttk
 from typing import Any
 
 from . import __version__, config as cfgmod
-from . import elevate, vdd, win_display
+from . import elevate, theme, vdd, win_display
 
 
 class App(tk.Tk):
     def __init__(self, startup_action: str | None = None) -> None:
         super().__init__()
         self.title(f"虚拟屏 VirtualScreen {__version__}")
-        self.geometry("1100x720")
-        self.minsize(900, 600)
+        self.geometry("1280x800")
+        self.minsize(960, 640)
+        theme.apply_theme(self)
 
         self.cfg: dict[str, Any] = cfgmod.load_config()
+        # 预览默认更稳：2fps，避免整页闪烁感
+        self.cfg.setdefault("preview_fps", 2)
+
         self._photos: list[tk.PhotoImage] = []
+        self._preview_labels: list[ttk.Label] = []
+        self._preview_caps: list[ttk.Label] = []
         self._preview_job: str | None = None
+        self._settings_open = False
+        self.row_vars: list[dict[str, tk.Variable]] = []
 
         self._build()
         self._load_fields_from_cfg()
@@ -35,60 +43,126 @@ class App(tk.Tk):
             self.on_clear(already_elevated=True)
 
     def _build(self) -> None:
-        top = ttk.Frame(self, padding=8)
-        top.pack(fill=tk.X)
+        # 顶栏：操作；参数进侧栏，预览占满
+        bar = ttk.Frame(self, style="Bar.TFrame", padding=(14, 10))
+        bar.pack(fill=tk.X)
+        ttk.Label(bar, text="VirtualScreen", style="Bar.TLabel").pack(side=tk.LEFT)
+        admin = "管理员" if elevate.is_admin() else "普通权限"
+        ttk.Label(bar, text=f"  ·  {admin}", style="BarMuted.TLabel").pack(side=tk.LEFT)
 
-        admin = "管理员" if elevate.is_admin() else "普通权限（应用/清除/装驱动会弹 UAC）"
-        ttk.Label(top, text=f"虚拟屏配置（物理像素 × 缩放）  [{admin}]").pack(anchor=tk.W)
-        self.rows_frame = ttk.Frame(top)
-        self.rows_frame.pack(fill=tk.X, pady=4)
-        self.row_vars: list[dict[str, tk.Variable]] = []
+        ttk.Button(bar, text="设置", style="Ghost.TButton", command=self.toggle_settings).pack(
+            side=tk.RIGHT, padx=(6, 0)
+        )
+        ttk.Button(bar, text="清除", style="Ghost.TButton", command=self.on_clear).pack(
+            side=tk.RIGHT, padx=(6, 0)
+        )
+        ttk.Button(bar, text="应用", style="Ghost.TButton", command=self.on_apply).pack(
+            side=tk.RIGHT, padx=(6, 0)
+        )
 
-        btns = ttk.Frame(top)
-        btns.pack(fill=tk.X, pady=4)
-        ttk.Button(btns, text="应用", command=self.on_apply).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btns, text="清除虚拟屏", command=self.on_clear).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btns, text="安装驱动", command=self.on_install_driver).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btns, text="保存配置", command=self.on_save).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btns, text="刷新监视器列表", command=self.on_refresh_list).pack(side=tk.LEFT)
+        # 主体：预览全幅 + 可滑出的设置层
+        self.body = ttk.Frame(self)
+        self.body.pack(fill=tk.BOTH, expand=True)
 
+        self.preview_host = ttk.Frame(self.body, style="Preview.TFrame")
+        self.preview_host.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        self.settings_panel = ttk.Frame(self.body, style="Surface.TFrame", padding=16)
+        # 默认收起
+
+        foot = ttk.Frame(self, padding=(14, 8))
+        foot.pack(fill=tk.X)
         self.status = tk.StringVar(value=self._status_line())
-        ttk.Label(top, textvariable=self.status, wraplength=1060).pack(anchor=tk.W, pady=(4, 0))
+        self.footer_info = tk.StringVar(value="")
+        ttk.Label(foot, textvariable=self.footer_info, style="Muted.TLabel").pack(side=tk.LEFT)
+        ttk.Label(foot, textvariable=self.status, style="Muted.TLabel").pack(side=tk.RIGHT)
 
-        mid = ttk.Frame(self, padding=8)
-        mid.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(mid, text="预览（优先抓虚拟屏；若无则抓非主屏，按比例缩小）").pack(anchor=tk.W)
-        self.preview_host = ttk.Frame(mid)
-        self.preview_host.pack(fill=tk.BOTH, expand=True, pady=4)
+        self._build_settings_content()
 
-        self.list_box = tk.Text(self, height=6, wrap=tk.WORD)
-        self.list_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+    def _build_settings_content(self) -> None:
+        p = self.settings_panel
+        for w in p.winfo_children():
+            w.destroy()
+
+        ttk.Label(p, text="虚拟屏规格", style="Section.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            p,
+            text="物理像素 × 缩放；应用后被测程序按此逻辑分辨率运行。",
+            style="Muted.TLabel",
+        ).pack(anchor=tk.W, pady=(2, 10))
+
+        self.rows_frame = ttk.Frame(p, style="Surface.TFrame")
+        self.rows_frame.pack(fill=tk.X)
+
+        btns = ttk.Frame(p, style="Surface.TFrame")
+        btns.pack(fill=tk.X, pady=(14, 8))
+        ttk.Button(btns, text="应用配置", style="Primary.TButton", command=self.on_apply).pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Button(btns, text="保存", command=self.on_save).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(btns, text="安装驱动", command=self.on_install_driver).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(btns, text="清除虚拟屏", style="Danger.TButton", command=self.on_clear).pack(
+            side=tk.LEFT
+        )
+
+        ttk.Label(p, text="监视器", style="Section.TLabel").pack(anchor=tk.W, pady=(12, 4))
+        self.list_box = tk.Text(
+            p,
+            height=10,
+            wrap=tk.WORD,
+            font=theme.font(9),
+            bg=theme.C["surface2"],
+            fg=theme.C["text"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=theme.C["border"],
+        )
+        self.list_box.pack(fill=tk.BOTH, expand=True)
+        ttk.Button(p, text="刷新列表", command=self.on_refresh_list).pack(anchor=tk.E, pady=(8, 0))
+        ttk.Button(p, text="关闭设置", command=self.toggle_settings).pack(anchor=tk.E, pady=(8, 0))
+        self.on_refresh_list()
+
+    def toggle_settings(self) -> None:
+        if self._settings_open:
+            self.settings_panel.place_forget()
+            self._settings_open = False
+            return
+        # 右侧抽屉，不抢预览主视线
+        self.settings_panel.place(relx=1.0, rely=0, anchor="ne", relheight=1, relwidth=0.38, width=420)
+        self.settings_panel.lift()
+        self._settings_open = True
         self.on_refresh_list()
 
     def _status_line(self) -> str:
         if vdd.vdd_installed():
-            return "驱动已就绪。改完分辨率/缩放后点「应用」。"
-        return "未检测到驱动：先点「安装驱动」（会弹 UAC），再「应用」。"
+            return "驱动已就绪"
+        return "未检测到驱动，请打开设置 → 安装驱动"
 
     def _load_fields_from_cfg(self) -> None:
         for child in self.rows_frame.winfo_children():
             child.destroy()
         self.row_vars.clear()
         for i, d in enumerate(self.cfg.get("displays", [])):
-            fr = ttk.Frame(self.rows_frame)
-            fr.pack(fill=tk.X, pady=2)
-            ttk.Label(fr, text=f"#{i+1}", width=4).pack(side=tk.LEFT)
+            card = ttk.Frame(self.rows_frame, style="Surface.TFrame", padding=(0, 0, 0, 10))
+            card.pack(fill=tk.X)
+            ttk.Label(card, text=f"屏 {i + 1}", style="Section.TLabel").pack(anchor=tk.W)
             vars_map: dict[str, tk.Variable] = {}
-            for key, width, default in (
-                ("label", 10, f"屏{i+1}"),
-                ("width", 6, 1920),
-                ("height", 6, 1080),
-                ("scale", 5, 100),
-                ("hz", 4, 60),
+            grid = ttk.Frame(card, style="Surface.TFrame")
+            grid.pack(fill=tk.X, pady=4)
+            for col, (key, width, default, tip) in enumerate(
+                (
+                    ("label", 12, f"虚拟屏{i + 1}", "名称"),
+                    ("width", 7, 1920, "宽"),
+                    ("height", 7, 1080, "高"),
+                    ("scale", 5, 100, "缩放%"),
+                    ("hz", 4, 60, "Hz"),
+                )
             ):
-                ttk.Label(fr, text=key).pack(side=tk.LEFT, padx=(6, 2))
+                cell = ttk.Frame(grid, style="Surface.TFrame")
+                cell.grid(row=0, column=col, padx=(0, 8), sticky="w")
+                ttk.Label(cell, text=tip, style="Muted.TLabel").pack(anchor=tk.W)
                 v = tk.StringVar(value=str(d.get(key, default)))
-                ttk.Entry(fr, textvariable=v, width=width).pack(side=tk.LEFT)
+                ttk.Entry(cell, textvariable=v, width=width).pack(anchor=tk.W)
                 vars_map[key] = v
             self.row_vars.append(vars_map)
 
@@ -131,15 +205,15 @@ class App(tk.Tk):
             return
         cfgmod.save_config(cfg)
         self.cfg = cfg
-        self.status.set("配置已保存到 exe 同目录 config.json。 " + self._status_line())
+        self.status.set("配置已保存")
 
     def on_install_driver(self, already_elevated: bool = False) -> None:
         if not already_elevated and not elevate.is_admin():
-            if not messagebox.askyesno("安装驱动", "将下载并安装 Virtual Display Driver，需要管理员权限。继续？"):
+            if not messagebox.askyesno("安装驱动", "将下载并安装 Virtual Display Driver，需要管理员。继续？"):
                 return
             self._elevate_and_exit("install-driver")
             return
-        self.status.set("正在安装驱动，请稍候…")
+        self.status.set("正在安装驱动…")
         self.update_idletasks()
         try:
             msg = vdd.install_driver()
@@ -193,61 +267,90 @@ class App(tk.Tk):
         messagebox.showinfo("清除", msg)
 
     def on_refresh_list(self) -> None:
+        if not hasattr(self, "list_box"):
+            return
         mons = win_display.list_monitors()
-        lines = ["当前监视器："]
+        lines = []
         for m in mons:
             tag = []
             if m.is_primary:
                 tag.append("主屏")
             if m.likely_virtual:
-                tag.append("疑似虚拟")
+                tag.append("虚拟")
             if not m.is_primary and not m.likely_virtual:
                 tag.append("副屏")
             lines.append(
-                f"- {m.device_name}  {m.width}x{m.height}+{m.left},{m.top}  "
-                f"{m.adapter_name or m.monitor_name}  [{','.join(tag) or '普通'}]"
+                f"{m.device_name}  {m.width}×{m.height}  "
+                f"{m.adapter_name or m.monitor_name}  [{','.join(tag)}]"
             )
-        lines.append("")
-        lines.append(self._status_line())
         self.list_box.delete("1.0", tk.END)
-        self.list_box.insert(tk.END, "\n".join(lines))
+        self.list_box.insert(tk.END, "\n".join(lines) or "（无）")
+        self.status.set(self._status_line())
 
     def _tick_preview(self) -> None:
         try:
             self._draw_preview()
         except Exception as e:
             self.status.set(f"预览异常: {e}")
-        fps = max(1, int(self.cfg.get("preview_fps", 5)))
+        fps = max(1, int(self.cfg.get("preview_fps", 2)))
         self._preview_job = self.after(int(1000 / fps), self._tick_preview)
+
+    def _ensure_preview_slots(self, n: int) -> None:
+        while len(self._preview_labels) < n:
+            fr = ttk.Frame(self.preview_host, style="Preview.TFrame", padding=8)
+            fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cap = ttk.Label(fr, text="", style="Caption.TLabel")
+            cap.pack(anchor=tk.W)
+            lbl = ttk.Label(fr, style="Caption.TLabel")
+            lbl.pack(fill=tk.BOTH, expand=True)
+            self._preview_caps.append(cap)
+            self._preview_labels.append(lbl)
+        # 多余槽隐藏
+        for i, lbl in enumerate(self._preview_labels):
+            parent = lbl.master
+            if i < n:
+                parent.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            else:
+                parent.pack_forget()
 
     def _draw_preview(self) -> None:
         targets = win_display.preview_targets(prefer_virtual=True)
-        max_h = max(80, int(self.cfg.get("preview_max_height", 320)))
-        for child in self.preview_host.winfo_children():
-            child.destroy()
-        self._photos.clear()
+        self.update_idletasks()
+        host_w = max(320, self.preview_host.winfo_width())
+        host_h = max(240, self.preview_host.winfo_height() - 28)
         if not targets:
-            ttk.Label(self.preview_host, text="没有可预览的监视器").pack()
+            self._ensure_preview_slots(1)
+            self._preview_caps[0].configure(text="没有可预览的监视器")
+            self._preview_labels[0].configure(image="", text="")
+            self.footer_info.set("")
+            self._photos = []
             return
-        for mon in targets:
-            scale = min(1.0, max_h / max(1, mon.height))
+
+        self._ensure_preview_slots(len(targets))
+        new_photos: list[tk.PhotoImage] = []
+        foot_bits: list[str] = []
+        slot_w = max(160, host_w // len(targets) - 16)
+
+        for i, mon in enumerate(targets):
+            scale = min(slot_w / max(1, mon.width), host_h / max(1, mon.height), 1.0)
             out_w = max(1, int(mon.width * scale))
             out_h = max(1, int(mon.height * scale))
-            fr = ttk.Frame(self.preview_host, padding=4)
-            fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            title = f"{mon.device_name}  {mon.width}x{mon.height}"
+            title = f"{mon.device_name}  {mon.width}×{mon.height}"
             if mon.likely_virtual:
-                title += "  (虚拟)"
-            ttk.Label(fr, text=title).pack(anchor=tk.W)
+                title += "  · 虚拟"
+            self._preview_caps[i].configure(text=title)
+            foot_bits.append(title)
             try:
                 rgb = win_display.capture_monitor_rgb(mon, out_w, out_h)
                 ppm = win_display.rgb_to_ppm(rgb, out_w, out_h)
                 img = tk.PhotoImage(data=ppm)
+                self._preview_labels[i].configure(image=img, text="")
+                new_photos.append(img)
             except Exception as e:
-                ttk.Label(fr, text=f"抓屏失败: {e}").pack()
-                continue
-            self._photos.append(img)
-            ttk.Label(fr, image=img).pack()
+                self._preview_labels[i].configure(image="", text=f"抓屏失败: {e}")
+
+        self._photos = new_photos  # 防 GC
+        self.footer_info.set("  |  ".join(foot_bits))
 
 
 def main() -> None:
