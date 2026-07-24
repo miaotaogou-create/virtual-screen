@@ -22,8 +22,9 @@ class App(tk.Tk):
         self.cfg.setdefault("preview_fps", 2)
 
         self._photos: list[tk.PhotoImage] = []
-        self._preview_labels: list[ttk.Label] = []
-        self._preview_caps: list[ttk.Label] = []
+        self._preview_index = 0
+        self._preview_target_keys: list[str] = []
+        self._tab_btns: list[tk.Label] = []
         self._preview_job: str | None = None
         self._settings_open = False
         self._busy = False
@@ -61,6 +62,18 @@ class App(tk.Tk):
 
         self.preview_host = ttk.Frame(self.body, style="Preview.TFrame")
         self.preview_host.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        # 一次只预览一块屏；顶栏 Tab 切换，中间区域尽量放大
+        self.tab_bar = tk.Frame(self.preview_host, bg=theme.C["preview_bg"], height=40)
+        self.tab_bar.pack(fill=tk.X, padx=10, pady=(10, 0))
+        self.tab_bar.pack_propagate(False)
+
+        stage = ttk.Frame(self.preview_host, style="Preview.TFrame", padding=(10, 8, 10, 10))
+        stage.pack(fill=tk.BOTH, expand=True)
+        self.preview_cap = ttk.Label(stage, text="", style="Caption.TLabel")
+        self.preview_cap.pack(anchor=tk.W)
+        self.preview_label = ttk.Label(stage, style="Caption.TLabel", anchor="center")
+        self.preview_label.pack(fill=tk.BOTH, expand=True)
 
         self.settings_panel = ttk.Frame(self.body, style="Surface.TFrame", padding=16)
 
@@ -325,62 +338,100 @@ class App(tk.Tk):
         fps = max(1, int(self.cfg.get("preview_fps", 2)))
         self._preview_job = self.after(int(1000 / fps), self._tick_preview)
 
-    def _ensure_preview_slots(self, n: int) -> None:
-        while len(self._preview_labels) < n:
-            fr = ttk.Frame(self.preview_host, style="Preview.TFrame", padding=8)
-            fr.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            cap = ttk.Label(fr, text="", style="Caption.TLabel")
-            cap.pack(anchor=tk.W)
-            lbl = ttk.Label(fr, style="Caption.TLabel")
-            lbl.pack(fill=tk.BOTH, expand=True)
-            self._preview_caps.append(cap)
-            self._preview_labels.append(lbl)
-        # 多余槽隐藏
-        for i, lbl in enumerate(self._preview_labels):
-            parent = lbl.master
-            if i < n:
-                parent.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            else:
-                parent.pack_forget()
+    def _monitor_title(self, mon: win_display.MonitorInfo) -> str:
+        title = f"{mon.device_name}  {mon.width}×{mon.height}"
+        if mon.likely_virtual:
+            title += "  · 虚拟"
+        return title
+
+    def _tab_label(self, mon: win_display.MonitorInfo, index: int) -> str:
+        name = (mon.adapter_name or mon.monitor_name or "").strip()
+        if mon.likely_virtual:
+            return f"虚拟屏 {index + 1}"
+        short = mon.device_name.replace("\\\\.\\", "")
+        return name[:10] or short
+
+    def _select_preview_tab(self, index: int) -> None:
+        if index == self._preview_index:
+            return
+        self._preview_index = index
+        self._refresh_tab_styles()
+        try:
+            self._draw_preview()
+        except Exception as e:
+            self.status.set(f"预览异常: {e}")
+
+    def _refresh_tab_styles(self) -> None:
+        for i, btn in enumerate(self._tab_btns):
+            active = i == self._preview_index
+            btn.configure(
+                bg=theme.C["primary"] if active else theme.C["preview_bg"],
+                fg="#FFFFFF" if active else "#94A3B8",
+                highlightbackground=theme.C["primary"] if active else "#334155",
+            )
+
+    def _sync_preview_tabs(self, targets: list[win_display.MonitorInfo]) -> None:
+        keys = [f"{m.device_name}:{m.width}x{m.height}" for m in targets]
+        if keys == self._preview_target_keys and len(self._tab_btns) == len(targets):
+            return
+        self._preview_target_keys = keys
+        for w in self.tab_bar.winfo_children():
+            w.destroy()
+        self._tab_btns.clear()
+        if self._preview_index >= len(targets):
+            self._preview_index = max(0, len(targets) - 1)
+        for i, mon in enumerate(targets):
+            btn = tk.Label(
+                self.tab_bar,
+                text=self._tab_label(mon, i),
+                font=theme.font(9),
+                padx=14,
+                pady=6,
+                cursor="hand2",
+                highlightthickness=1,
+                highlightbackground="#334155",
+                bd=0,
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 6), pady=4)
+            btn.bind("<Button-1>", lambda _e, idx=i: self._select_preview_tab(idx))
+            self._tab_btns.append(btn)
+        self._refresh_tab_styles()
 
     def _draw_preview(self) -> None:
         targets = win_display.preview_targets(prefer_virtual=True)
         self.update_idletasks()
-        host_w = max(320, self.preview_host.winfo_width())
-        host_h = max(240, self.preview_host.winfo_height() - 28)
+        # 扣除 Tab 栏与标题，中间区域尽量放大单屏
+        host_w = max(320, self.preview_label.winfo_width() or self.preview_host.winfo_width() - 20)
+        host_h = max(240, self.preview_label.winfo_height() or (self.preview_host.winfo_height() - 70))
         if not targets:
-            self._ensure_preview_slots(1)
-            self._preview_caps[0].configure(text="没有可预览的监视器")
-            self._preview_labels[0].configure(image="", text="")
+            self._sync_preview_tabs([])
+            self.preview_cap.configure(text="没有可预览的监视器")
+            self.preview_label.configure(image="", text="")
             self.footer_info.set("")
             self._photos = []
             return
 
-        self._ensure_preview_slots(len(targets))
-        new_photos: list[tk.PhotoImage] = []
-        foot_bits: list[str] = []
-        slot_w = max(160, host_w // len(targets) - 16)
+        self._sync_preview_tabs(targets)
+        idx = min(self._preview_index, len(targets) - 1)
+        self._preview_index = idx
+        mon = targets[idx]
+        title = self._monitor_title(mon)
+        self.preview_cap.configure(text=title)
+        foot_bits = [self._monitor_title(m) for m in targets]
+        self.footer_info.set(f"预览 {idx + 1}/{len(targets)}  ·  " + "  |  ".join(foot_bits))
 
-        for i, mon in enumerate(targets):
-            scale = min(slot_w / max(1, mon.width), host_h / max(1, mon.height), 1.0)
-            out_w = max(1, int(mon.width * scale))
-            out_h = max(1, int(mon.height * scale))
-            title = f"{mon.device_name}  {mon.width}×{mon.height}"
-            if mon.likely_virtual:
-                title += "  · 虚拟"
-            self._preview_caps[i].configure(text=title)
-            foot_bits.append(title)
-            try:
-                rgb = win_display.capture_monitor_rgb(mon, out_w, out_h)
-                ppm = win_display.rgb_to_ppm(rgb, out_w, out_h)
-                img = tk.PhotoImage(data=ppm)
-                self._preview_labels[i].configure(image=img, text="")
-                new_photos.append(img)
-            except Exception as e:
-                self._preview_labels[i].configure(image="", text=f"抓屏失败: {e}")
-
-        self._photos = new_photos  # 防 GC
-        self.footer_info.set("  |  ".join(foot_bits))
+        scale = min(host_w / max(1, mon.width), host_h / max(1, mon.height), 1.0)
+        out_w = max(1, int(mon.width * scale))
+        out_h = max(1, int(mon.height * scale))
+        try:
+            rgb = win_display.capture_monitor_rgb(mon, out_w, out_h)
+            ppm = win_display.rgb_to_ppm(rgb, out_w, out_h)
+            img = tk.PhotoImage(data=ppm)
+            self.preview_label.configure(image=img, text="")
+            self._photos = [img]  # 防 GC
+        except Exception as e:
+            self.preview_label.configure(image="", text=f"抓屏失败: {e}")
+            self._photos = []
 
 
 def main() -> None:
