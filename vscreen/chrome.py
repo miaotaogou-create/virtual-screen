@@ -86,7 +86,7 @@ class TitleChrome:
         self.root.overrideredirect(True)
         self.root.configure(highlightthickness=1, highlightbackground=C["bar_deep"], highlightcolor=C["bar_deep"])
 
-        header = tk.Frame(self.root, bg=C["bar"], height=48)
+        header = tk.Frame(self.root, bg=C["bar"], height=52)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Frame(header, bg=C["bar_deep"], height=2).pack(side=tk.BOTTOM, fill=tk.X)
@@ -95,22 +95,25 @@ class TitleChrome:
         bar.pack(fill=tk.BOTH, expand=True, padx=4)
 
         left = tk.Frame(bar, bg=C["bar"])
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 8), pady=6)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(12, 8), pady=8)
         mark = tk.Canvas(left, width=28, height=28, bg=C["bar"], highlightthickness=0)
         mark.pack(side=tk.LEFT, padx=(0, 10))
         mark.create_oval(2, 2, 26, 26, fill=C["accent_soft"], outline=C["accent_soft"])
         mark.create_text(14, 14, text="V", fill=C["primary"], font=font(11, "bold"))
-        titles = tk.Frame(left, bg=C["bar"])
-        titles.pack(side=tk.LEFT, fill=tk.Y)
-        tk.Label(titles, text="VirtualScreen", bg=C["bar"], fg="#FFFFFF", font=font(12, "bold")).pack(anchor=tk.W)
-        self.sub_label = tk.Label(
-            titles, text=self.subtitle, bg=C["bar"], fg="#99F6E4", font=font(8)
+        # 单行标题，避免中文副标题被顶栏裁切
+        self.title_label = tk.Label(
+            left,
+            text=f"VirtualScreen  ·  {self.subtitle}",
+            bg=C["bar"],
+            fg="#FFFFFF",
+            font=font(12, "bold"),
+            anchor="w",
         )
-        self.sub_label.pack(anchor=tk.W)
+        self.title_label.pack(side=tk.LEFT, fill=tk.Y)
 
-        # 右侧：操作胶囊 + 窗控
+        # 右侧：操作胶囊 + 窗控（与左侧图标垂直对齐）
         right = tk.Frame(bar, bg=C["bar"])
-        right.pack(side=tk.RIGHT, padx=(0, 4), pady=9)
+        right.pack(side=tk.RIGHT, padx=(0, 4), pady=11)
 
         actions = tk.Frame(right, bg=C["bar"])
         actions.pack(side=tk.LEFT, padx=(0, 8))
@@ -126,7 +129,7 @@ class TitleChrome:
             winbtns, "close", self.on_close, hover_bg="#DC2626", hover_fg="#FFFFFF"
         )
 
-        for w in (header, bar, left, titles, mark, *titles.winfo_children()):
+        for w in (header, bar, left, mark, self.title_label):
             self._bind_drag(w)
 
         self.root.bind("<Map>", self._on_map)
@@ -257,4 +260,5 @@ class TitleChrome:
             self._set_max_icon("max")
 
     def set_subtitle(self, text: str) -> None:
-        self.sub_label.configure(text=text)
+        self.subtitle = text
+        self.title_label.configure(text=f"VirtualScreen  ·  {text}")
