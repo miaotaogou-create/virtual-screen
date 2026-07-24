@@ -7,5 +7,3 @@ config.json
 .DS_Store
 build/
 _vendor/
-*.spec
-
