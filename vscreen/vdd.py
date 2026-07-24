@@ -122,10 +122,10 @@ def restart_vdd_devices() -> int:
             _pnp_set_enabled(iid, False)
         except RuntimeError:
             pass
-        time.sleep(0.4)
+        time.sleep(0.25)
         _pnp_set_enabled(iid, True)
         n += 1
-    time.sleep(1.2)
+    time.sleep(0.6)
     return n
 
 
@@ -141,7 +141,7 @@ def disable_vdd_devices() -> int:
     return n
 
 
-def wait_for_virtual_monitors(expected: int, timeout_s: float = 12.0) -> list[win_display.MonitorInfo]:
+def wait_for_virtual_monitors(expected: int, timeout_s: float = 8.0) -> list[win_display.MonitorInfo]:
     deadline = time.time() + timeout_s
     last: list[win_display.MonitorInfo] = []
     while time.time() < deadline:
@@ -153,22 +153,43 @@ def wait_for_virtual_monitors(expected: int, timeout_s: float = 12.0) -> list[wi
         secondary = [m for m in mons if not m.is_primary]
         if len(secondary) >= expected:
             return secondary[:expected]
-        time.sleep(0.5)
+        time.sleep(0.2)
     return last
 
 
-def apply_config(cfg: dict) -> str:
+def apply_config(cfg: dict, progress=None) -> str:
+    """progress: 可选回调 progress(str)，用于界面提示。"""
+
+    def note(msg: str) -> None:
+        if progress:
+            progress(msg)
+
     displays = cfg["displays"]
     path = Path(cfg.get("vdd_settings_path") or r"C:\VirtualDisplayDriver\vdd_settings.xml")
+    note("写入驱动配置…")
     write_vdd_settings(path, displays)
-    n_dev = restart_vdd_devices()
-    virtuals = wait_for_virtual_monitors(len(displays))
+
+    # 已有足够虚拟屏时跳过整驱动重启（最耗时），只改分辨率/位置/缩放
+    existing = [m for m in win_display.list_monitors() if m.likely_virtual]
+    n_dev = 0
+    if len(existing) >= len(displays):
+        note("虚拟屏已在线，跳过驱动重启…")
+        virtuals = existing[: len(displays)]
+    else:
+        note("重启虚拟显示驱动…")
+        n_dev = restart_vdd_devices()
+        note("等待虚拟屏出现…")
+        virtuals = wait_for_virtual_monitors(len(displays))
+
     if len(virtuals) < len(displays):
         return (
-            f"已写入 {path} 并重启 {n_dev} 个驱动设备，但只看到 {len(virtuals)} 块副屏"
-            f"（期望 {len(displays)}）。可在系统显示设置里确认。"
+            f"已写入 {path}"
+            + (f" 并重启 {n_dev} 个驱动设备" if n_dev else "")
+            + f"，但只看到 {len(virtuals)} 块副屏（期望 {len(displays)}）。"
+            "可在系统显示设置里确认。"
         )
 
+    note("设置分辨率与排列…")
     primary = next((m for m in win_display.list_monitors() if m.is_primary), None)
     if primary is None:
         raise RuntimeError("找不到主显示器")
@@ -180,8 +201,9 @@ def apply_config(cfg: dict) -> str:
         x += w
     win_display.apply_display_changes()
 
-    time.sleep(0.8)
-    virtuals2 = wait_for_virtual_monitors(len(displays), timeout_s=6.0)
+    time.sleep(0.25)
+    note("应用 DPI 缩放…")
+    virtuals2 = wait_for_virtual_monitors(len(displays), timeout_s=4.0) or virtuals
     dpi_notes: list[str] = []
     for mon, spec in zip(virtuals2, displays):
         try:
@@ -189,7 +211,10 @@ def apply_config(cfg: dict) -> str:
         except Exception as e:  # ponytail: DPI 因系统而异
             dpi_notes.append(f"{mon.device_name}: {e}")
 
-    msg = f"已应用 {len(displays)} 块虚拟屏（驱动设备 {n_dev}）。"
+    if n_dev:
+        msg = f"已应用 {len(displays)} 块虚拟屏（驱动设备 {n_dev}）。"
+    else:
+        msg = f"已更新 {len(displays)} 块虚拟屏分辨率/缩放。"
     if dpi_notes:
         msg += " 部分缩放未生效，可在系统显示设置里手动设。"
     return msg

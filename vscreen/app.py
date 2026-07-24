@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import sys
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Any
+from typing import Any, Callable
 
 from . import __version__, config as cfgmod
 from . import elevate, theme, vdd, win_display
@@ -26,6 +27,7 @@ class App(tk.Tk):
         self._preview_caps: list[ttk.Label] = []
         self._preview_job: str | None = None
         self._settings_open = False
+        self._busy = False
         self.row_vars: list[dict[str, tk.Variable]] = []
 
         self._build()
@@ -193,6 +195,53 @@ class App(tk.Tk):
         self.destroy()
         sys.exit(0)
 
+    def _set_busy(self, busy: bool, tip: str = "") -> None:
+        self._busy = busy
+        if tip:
+            self.status.set(tip)
+        # 忙碌时暂停预览抓屏，减轻卡顿感
+        if busy and self._preview_job:
+            try:
+                self.after_cancel(self._preview_job)
+            except Exception:
+                pass
+            self._preview_job = None
+        elif not busy and self._preview_job is None:
+            self._tick_preview()
+
+    def _run_bg(self, work: Callable[[], str], title: str, busy_tip: str) -> None:
+        if self._busy:
+            messagebox.showinfo("请稍候", "已有任务在进行中。")
+            return
+
+        def progress(msg: str) -> None:
+            self.after(0, lambda m=msg: self.status.set(m))
+
+        def runner() -> None:
+            try:
+                msg = work(progress)
+            except Exception as e:
+                err = str(e)
+
+                def fail() -> None:
+                    self._set_busy(False)
+                    self.status.set(f"{title}失败: {err}")
+                    messagebox.showerror(title, err)
+
+                self.after(0, fail)
+                return
+
+            def ok() -> None:
+                self._set_busy(False)
+                self.status.set(msg)
+                self.on_refresh_list()
+                messagebox.showinfo(title, msg)
+
+            self.after(0, ok)
+
+        self._set_busy(True, busy_tip)
+        threading.Thread(target=runner, daemon=True).start()
+
     def on_save(self) -> None:
         try:
             cfg = self._cfg_from_fields()
@@ -213,17 +262,12 @@ class App(tk.Tk):
                 return
             self._elevate_and_exit("install-driver")
             return
-        self.status.set("正在安装驱动…")
-        self.update_idletasks()
-        try:
-            msg = vdd.install_driver()
-        except Exception as e:
-            messagebox.showerror("安装失败", str(e))
-            self.status.set(f"安装失败: {e}")
-            return
-        self.status.set(msg)
-        self.on_refresh_list()
-        messagebox.showinfo("安装驱动", msg)
+
+        def work(progress) -> str:
+            progress("正在下载/安装驱动…")
+            return vdd.install_driver()
+
+        self._run_bg(work, "安装驱动", "正在安装驱动，界面可继续预览以外的操作…")
 
     def on_apply(self, already_elevated: bool = False) -> None:
         try:
@@ -240,15 +284,11 @@ class App(tk.Tk):
         if not already_elevated and not elevate.is_admin():
             self._elevate_and_exit("apply")
             return
-        try:
-            msg = vdd.apply_config(cfg)
-        except Exception as e:
-            messagebox.showerror("应用失败", str(e))
-            self.status.set(f"应用失败: {e}")
-            return
-        self.status.set(msg)
-        self.on_refresh_list()
-        messagebox.showinfo("应用", msg)
+
+        def work(progress) -> str:
+            return vdd.apply_config(cfg, progress=progress)
+
+        self._run_bg(work, "应用", "正在应用配置…")
 
     def on_clear(self, already_elevated: bool = False) -> None:
         if not already_elevated:
@@ -257,14 +297,12 @@ class App(tk.Tk):
             if not elevate.is_admin():
                 self._elevate_and_exit("clear")
                 return
-        try:
-            msg = vdd.clear_virtual_displays()
-        except Exception as e:
-            messagebox.showerror("清除失败", str(e))
-            return
-        self.status.set(msg)
-        self.on_refresh_list()
-        messagebox.showinfo("清除", msg)
+
+        def work(progress) -> str:
+            progress("正在清除虚拟屏…")
+            return vdd.clear_virtual_displays()
+
+        self._run_bg(work, "清除", "正在清除虚拟屏…")
 
     def on_refresh_list(self) -> None:
         if not hasattr(self, "list_box"):
