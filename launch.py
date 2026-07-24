@@ -83,6 +83,11 @@ _prepare_frozen()
 if __name__ == "__main__":
     if "--smoke" in sys.argv:
         raise SystemExit(_smoke())
+    # 启动时提权一次：之后本会话应用/清除/装驱动不再反复弹 UAC
+    # （Windows 无法静默自动点同意，只能减少弹窗次数）
+    from vscreen.elevate import ensure_admin_at_start
+
+    ensure_admin_at_start()
     from vscreen.app import main
 
     main()

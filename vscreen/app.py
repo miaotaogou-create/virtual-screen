@@ -45,7 +45,7 @@ class App(tk.Tk):
             self.on_clear(already_elevated=True)
 
     def _build(self) -> None:
-        admin = "管理员" if elevate.is_admin() else "普通权限 · 应用/清除会弹 UAC"
+        admin = "管理员权限" if elevate.is_admin() else "普通权限（启动时若取消 UAC，操作仍会再弹）"
         self._chrome = chrome.TitleChrome(
             self,
             subtitle=admin,

@@ -24,5 +24,5 @@ pip install pyinstaller
 
 ## 说明
 
-- 系统虚拟屏依赖 [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)；程序内一键安装/应用/清除。
-- 不是完整硬件仿真。
+- 改显示配置 / 装驱动需要管理员。程序**启动时提权一次**（弹一次 UAC），之后本会话内应用/清除一般不再反复弹窗。
+- Windows **不能**让程序静默自动点同意 UAC；若需完全不弹，只能在系统里关闭 UAC（不推荐）或以管理员账户长期登录。
