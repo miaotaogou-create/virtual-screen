@@ -83,6 +83,10 @@ _prepare_frozen()
 if __name__ == "__main__":
     if "--smoke" in sys.argv:
         raise SystemExit(_smoke())
+    # 尽早声明 DPI，后续抓屏坐标才与系统逻辑分辨率一致
+    from vscreen.win_display import ensure_dpi_aware
+
+    ensure_dpi_aware()
     # 启动时提权一次：之后本会话应用/清除/装驱动不再反复弹 UAC
     # （Windows 无法静默自动点同意，只能减少弹窗次数）
     from vscreen.elevate import ensure_admin_at_start

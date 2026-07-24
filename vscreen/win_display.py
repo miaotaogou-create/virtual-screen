@@ -25,6 +25,7 @@ SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
 SRCCOPY = 0x00CC0020
 HALFTONE = 4
+COLORONCOLOR = 3  # 预览缩小用，比 HALFTONE 轻
 
 QDC_ONLY_ACTIVE_PATHS = 0x00000002
 DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE = 1
@@ -35,6 +36,24 @@ DISPLAYCONFIG_DEVICE_INFO_SET_DPI_SCALE = -4
 DPI_SCALE_VALUES = (100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500)
 
 VDD_HINTS = ("VDD", "MTT", "IddSample", "Virtual Display", "MttVDD", "Indirect")
+
+_dpi_ready = False
+
+
+def ensure_dpi_aware() -> None:
+    """进程级 Per-Monitor DPI，避免抓屏坐标与逻辑分辨率错位。"""
+    global _dpi_ready
+    if _dpi_ready:
+        return
+    try:
+        # PROCESS_PER_MONITOR_DPI_AWARE = 2
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    _dpi_ready = True
 
 
 class DISPLAY_DEVICEW(ctypes.Structure):
@@ -241,6 +260,7 @@ def _is_vdd_text(text: str) -> bool:
 
 def list_monitors() -> list[MonitorInfo]:
     """列出当前接到桌面的监视器。"""
+    ensure_dpi_aware()
     by_device: dict[str, tuple[str, str, bool]] = {}
     i = 0
     while True:
@@ -408,6 +428,7 @@ def set_dpi_scale(device_name: str, scale_percent: int) -> None:
 
 def capture_monitor_rgb(mon: MonitorInfo, out_w: int, out_h: int) -> bytes:
     """用 StretchBlt 抓取监视器画面，返回 RGB 原始字节（out_w * out_h * 3）。"""
+    ensure_dpi_aware()
     if out_w < 1 or out_h < 1:
         raise ValueError("预览尺寸无效")
     hdc_screen = user32.GetDC(0)
@@ -415,21 +436,23 @@ def capture_monitor_rgb(mon: MonitorInfo, out_w: int, out_h: int) -> bytes:
         raise RuntimeError("GetDC 失败")
     try:
         hdc_mem = gdi32.CreateCompatibleDC(hdc_screen)
-        bmi = ctypes.create_string_buffer(40 + out_w * out_h * 4)
-        # BITMAPINFOHEADER
+        # 24bpp + DWORD 行对齐，少拷一层 alpha，减轻预览 CPU
+        stride = (out_w * 3 + 3) & ~3
+        bmi = ctypes.create_string_buffer(40)
         bi = ctypes.cast(bmi, ctypes.POINTER(ctypes.c_uint32))
         bi[0] = 40
         bi[1] = out_w
         bi[2] = -out_h  # 顶向下
         ctypes.cast(ctypes.addressof(bmi) + 12, ctypes.POINTER(ctypes.c_uint16))[0] = 1
-        ctypes.cast(ctypes.addressof(bmi) + 14, ctypes.POINTER(ctypes.c_uint16))[0] = 32
+        ctypes.cast(ctypes.addressof(bmi) + 14, ctypes.POINTER(ctypes.c_uint16))[0] = 24
         bits = ctypes.c_void_p()
         hbmp = gdi32.CreateDIBSection(hdc_mem, bmi, 0, ctypes.byref(bits), None, 0)
         if not hbmp:
             gdi32.DeleteDC(hdc_mem)
             raise RuntimeError("CreateDIBSection 失败")
         old = gdi32.SelectObject(hdc_mem, hbmp)
-        gdi32.SetStretchBltMode(hdc_mem, HALFTONE)
+        # COLORONCOLOR：预览缩放够用，比 HALFTONE 省 CPU
+        gdi32.SetStretchBltMode(hdc_mem, COLORONCOLOR)
         ok = gdi32.StretchBlt(
             hdc_mem,
             0,
@@ -448,17 +471,18 @@ def capture_monitor_rgb(mon: MonitorInfo, out_w: int, out_h: int) -> bytes:
             gdi32.DeleteObject(hbmp)
             gdi32.DeleteDC(hdc_mem)
             raise RuntimeError("StretchBlt 失败")
-        # BGRA -> RGB
-        src = ctypes.string_at(bits, out_w * out_h * 4)
+        # DIB 24bpp 为 BGR；转 RGB。按行处理，跳过对齐填充。
+        src = ctypes.string_at(bits, stride * out_h)
         rgb = bytearray(out_w * out_h * 3)
-        si = 0
         di = 0
-        for _ in range(out_w * out_h):
-            rgb[di] = src[si + 2]
-            rgb[di + 1] = src[si + 1]
-            rgb[di + 2] = src[si]
-            si += 4
-            di += 3
+        for y in range(out_h):
+            row = y * stride
+            for x in range(out_w):
+                si = row + x * 3
+                rgb[di] = src[si + 2]
+                rgb[di + 1] = src[si + 1]
+                rgb[di + 2] = src[si]
+                di += 3
         gdi32.DeleteObject(hbmp)
         gdi32.DeleteDC(hdc_mem)
         return bytes(rgb)

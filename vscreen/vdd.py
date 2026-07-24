@@ -12,8 +12,9 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from . import win_display
 
-# Windows：隐藏子进程控制台，避免双击后闪黑框
+# Windows：隐藏子进程控制台，避免双击后闪黑框 / PowerShell 蓝框
 _CREATE_NO_WINDOW = 0x08000000
+_SW_HIDE = 0
 
 NEFCON_URL = "https://github.com/nefarius/nefcon/releases/download/v1.14.0/nefcon_v1.14.0.zip"
 DRIVER_URL = (
@@ -32,6 +33,11 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     kwargs.setdefault("errors", "replace")
     kwargs.setdefault("check", False)
     kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | _CREATE_NO_WINDOW
+    # CREATE_NO_WINDOW  alone 对 powershell 有时仍闪一下；再加 STARTUPINFO
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = _SW_HIDE
+    kwargs["startupinfo"] = si
     return subprocess.run(cmd, **kwargs)
 
 
@@ -65,13 +71,59 @@ def write_vdd_settings(path: Path, displays: list[dict]) -> None:
     path.write_bytes(tostring(root, encoding="utf-8", xml_declaration=True))
 
 
+def _parse_pnputil_devices(text: str) -> list[dict]:
+    """从 pnputil /enum-devices 文本里筛 Virtual Display 相关设备。"""
+    hints = ("virtual display", "mttvdd", "iddsample", "indirect display", "vdd by")
+    items: list[dict] = []
+    cur: dict[str, str] = {}
+
+    def flush() -> None:
+        nonlocal cur
+        if not cur:
+            return
+        desc = (cur.get("desc") or "") + " " + (cur.get("id") or "")
+        low = desc.lower()
+        if any(h in low for h in hints):
+            items.append(
+                {
+                    "Status": cur.get("status", ""),
+                    "Class": cur.get("class", ""),
+                    "FriendlyName": cur.get("desc", ""),
+                    "InstanceId": cur.get("id", ""),
+                }
+            )
+        cur = {}
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        low = line.lower()
+        if low.startswith("instance id:") or low.startswith("实例 id:") or "instance id:" in low:
+            flush()
+            cur["id"] = line.split(":", 1)[-1].strip()
+        elif low.startswith("device description:") or low.startswith("设备描述:"):
+            cur["desc"] = line.split(":", 1)[-1].strip()
+        elif low.startswith("class name:") or low.startswith("类名:"):
+            cur["class"] = line.split(":", 1)[-1].strip()
+        elif low.startswith("status:") or low.startswith("状态:"):
+            cur["status"] = line.split(":", 1)[-1].strip()
+    flush()
+    return items
+
+
 def find_vdd_devices(*, force: bool = False) -> list[dict]:
     global _device_cache, _device_cache_at
     now = time.time()
     if not force and _device_cache is not None and now - _device_cache_at < 8:
         return _device_cache
 
-    ps = r"""
+    # 优先 pnputil（无 PowerShell 蓝框）；失败再回退隐藏 PowerShell
+    r = _run(["pnputil", "/enum-devices", "/connected"])
+    data = _parse_pnputil_devices(r.stdout or "")
+    if not data:
+        ps = r"""
 $names = @('Virtual Display Driver','IddSampleDriver','MttVDD','VDD','Indirect Display Driver')
 Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
   $n = $_.FriendlyName
@@ -79,19 +131,28 @@ Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
   $false
 } | Select-Object Status, Class, FriendlyName, InstanceId | ConvertTo-Json -Compress
 """
-    r = _run(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
-    out = (r.stdout or "").strip()
-    if not out:
-        _device_cache, _device_cache_at = [], now
-        return []
-    data = json.loads(out)
-    if isinstance(data, dict):
-        data = [data]
-    _device_cache, _device_cache_at = list(data), now
+        r2 = _run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                ps,
+            ]
+        )
+        out = (r2.stdout or "").strip()
+        if out:
+            parsed = json.loads(out)
+            data = [parsed] if isinstance(parsed, dict) else list(parsed)
+
+    _device_cache, _device_cache_at = data, now
     return _device_cache
 
 
 def vdd_installed() -> bool:
+    # 启动态优先走目录/监视器，避免无谓拉起 pnputil/powershell
     if Path(r"C:\VirtualDisplayDriver").is_dir():
         return True
     if any(m.likely_virtual for m in win_display.list_monitors()):
@@ -101,11 +162,25 @@ def vdd_installed() -> bool:
 
 def _pnp_set_enabled(instance_id: str, enabled: bool) -> None:
     global _device_cache_at
-    cmd = "Enable-PnpDevice" if enabled else "Disable-PnpDevice"
-    ps = f'{cmd} -InstanceId "{instance_id}" -Confirm:$false'
-    r = _run(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
+    # pnputil 启停，避免 PowerShell 窗
+    action = "/enable-device" if enabled else "/disable-device"
+    r = _run(["pnputil", action, instance_id])
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or r.stdout or f"{cmd} 失败").strip())
+        cmd = "Enable-PnpDevice" if enabled else "Disable-PnpDevice"
+        ps = f'{cmd} -InstanceId "{instance_id}" -Confirm:$false'
+        r2 = _run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                ps,
+            ]
+        )
+        if r2.returncode != 0:
+            raise RuntimeError((r2.stderr or r2.stdout or r.stderr or r.stdout or f"{cmd} 失败").strip())
     _device_cache_at = 0
 
 

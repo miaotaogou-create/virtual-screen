@@ -19,7 +19,8 @@ class App(tk.Tk):
         theme.apply_theme(self)
 
         self.cfg: dict[str, Any] = cfgmod.load_config()
-        self.cfg.setdefault("preview_fps", 2)
+        self.cfg.setdefault("preview_fps", 1)
+        self.cfg.setdefault("preview_max_height", 540)
 
         self._photos: list[tk.PhotoImage] = []
         self._preview_index = 0
@@ -332,10 +333,14 @@ class App(tk.Tk):
 
     def _tick_preview(self) -> None:
         try:
-            self._draw_preview()
+            # 最小化时不抓屏，省 CPU
+            if self.state() == "iconic":
+                pass
+            else:
+                self._draw_preview()
         except Exception as e:
             self.status.set(f"预览异常: {e}")
-        fps = max(1, int(self.cfg.get("preview_fps", 2)))
+        fps = max(1, int(self.cfg.get("preview_fps", 1)))
         self._preview_job = self.after(int(1000 / fps), self._tick_preview)
 
     def _monitor_title(self, mon: win_display.MonitorInfo) -> str:
@@ -344,11 +349,31 @@ class App(tk.Tk):
             title += "  · 虚拟"
         return title
 
+    def _logical_tip(self, mon: win_display.MonitorInfo) -> str:
+        """配置里若开了缩放，逻辑工作区会小于物理像素，被测 UI 可能裁切。"""
+        specs = self.cfg.get("displays") or []
+        idx = self._preview_index
+        if idx < 0 or idx >= len(specs):
+            return ""
+        spec = specs[idx]
+        try:
+            pw, ph, scale = int(spec["width"]), int(spec["height"]), int(spec.get("scale", 100))
+        except (KeyError, TypeError, ValueError):
+            return ""
+        if scale <= 100:
+            return ""
+        # 系统逻辑像素 ≈ 物理 / (scale/100)
+        lw = max(1, round(pw * 100 / scale))
+        lh = max(1, round(ph * 100 / scale))
+        if mon.width == lw and mon.height == lh:
+            return f"缩放 {scale}% → 逻辑 {lw}×{lh}（被测程序按此布局；装不下会裁切，可把缩放改 100%）"
+        return f"配置 {pw}×{ph} @ {scale}%；当前监视器 {mon.width}×{mon.height}"
+
     def _tab_label(self, mon: win_display.MonitorInfo, index: int) -> str:
-        name = (mon.adapter_name or mon.monitor_name or "").strip()
         if mon.likely_virtual:
             return f"虚拟屏 {index + 1}"
         short = mon.device_name.replace("\\\\.\\", "")
+        name = (mon.adapter_name or mon.monitor_name or "").strip()
         return name[:10] or short
 
     def _select_preview_tab(self, index: int) -> None:
@@ -400,7 +425,6 @@ class App(tk.Tk):
     def _draw_preview(self) -> None:
         targets = win_display.preview_targets(prefer_virtual=True)
         self.update_idletasks()
-        # 扣除 Tab 栏与标题，中间区域尽量放大单屏
         host_w = max(320, self.preview_label.winfo_width() or self.preview_host.winfo_width() - 20)
         host_h = max(240, self.preview_label.winfo_height() or (self.preview_host.winfo_height() - 70))
         if not targets:
@@ -416,11 +440,14 @@ class App(tk.Tk):
         self._preview_index = idx
         mon = targets[idx]
         title = self._monitor_title(mon)
-        self.preview_cap.configure(text=title)
+        tip = self._logical_tip(mon)
+        self.preview_cap.configure(text=title + (f"  ·  {tip}" if tip else ""))
         foot_bits = [self._monitor_title(m) for m in targets]
         self.footer_info.set(f"预览 {idx + 1}/{len(targets)}  ·  " + "  |  ".join(foot_bits))
 
-        scale = min(host_w / max(1, mon.width), host_h / max(1, mon.height), 1.0)
+        # 预览限高，避免按整屏分辨率反复编码拖垮本机
+        max_h = max(240, int(self.cfg.get("preview_max_height", 540)))
+        scale = min(host_w / max(1, mon.width), host_h / max(1, mon.height), max_h / max(1, mon.height), 1.0)
         out_w = max(1, int(mon.width * scale))
         out_h = max(1, int(mon.height * scale))
         try:

@@ -20,11 +20,11 @@ EXAMPLE_CONFIG_PATH = ROOT / "config.example.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "displays": [
-        {"width": 1920, "height": 1080, "scale": 125, "hz": 60, "label": "虚拟屏1"},
+        {"width": 1920, "height": 1080, "scale": 100, "hz": 60, "label": "虚拟屏1"},
         {"width": 1920, "height": 1080, "scale": 100, "hz": 60, "label": "虚拟屏2"},
     ],
-    "preview_max_height": 900,
-    "preview_fps": 2,
+    "preview_max_height": 540,
+    "preview_fps": 1,
     "vdd_settings_path": r"C:\VirtualDisplayDriver\vdd_settings.xml",
 }
 
