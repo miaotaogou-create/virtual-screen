@@ -14,3 +14,6 @@ Makefile.*
 .qmake.stash
 *.user
 _vendor/
+
+build/*.spec
+
