@@ -17,3 +17,8 @@ _vendor/
 
 build/*.spec
 
+
+VirtualScreen_resource.rc
+build/
+dist/portable/
+

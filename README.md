@@ -6,11 +6,25 @@
 
 ## 运行
 
+### 开发/本机目录版（推荐调试）
+
 ```text
 dist\VirtualScreen.exe
 ```
 
-同目录需有 Qt DLL（`build_qt.ps1` 会用 windeployqt 部署）。
+同目录需有 Qt DLL（`build_qt.ps1` 会用 windeployqt 部署）。**整份 `dist\` 文件夹**拷到别的电脑即可跑（需目标机有 VC++ 运行库，或把 `msvcp140.dll` / `vcruntime140*.dll` 一并放进 `dist`）。
+
+### 单文件绿色版（Enigma Virtual Box）
+
+Qt 本身不是「一个 exe 走天下」；常用做法是 **windeployqt 收齐 DLL → Enigma Virtual Box 虚拟进主程序**。
+
+```powershell
+.\pack_evb.ps1
+```
+
+首次会打开 EVB，按提示把 `build\evb_stage` 里的 DLL/插件打进 `dist\portable\VirtualScreen.exe`，并另存 `pack\VirtualScreen.evb`；之后脚本可自动打包。
+
+注意：`config.json` / `profiles\` 不要打进虚拟盒，放在便携 exe **旁边**，方便读写。
 
 ## 编译
 

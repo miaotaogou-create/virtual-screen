@@ -37,7 +37,8 @@ HEADERS += \
 
 LIBS += -luser32 -lgdi32 -lshell32 -ladvapi32
 
-RC_ICONS =
+RC_ICONS = resources/VirtualScreen.ico
+RESOURCES += resources/app.qrc
 
 DESTDIR = $$PWD/dist
 OBJECTS_DIR = $$PWD/build/obj

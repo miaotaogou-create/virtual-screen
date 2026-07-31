@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QFont>
+#include <QIcon>
 #include <QTimer>
 
 int main(int argc, char *argv[])
@@ -14,6 +15,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("VirtualScreen"));
     app.setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setWindowIcon(QIcon(QStringLiteral(":/VirtualScreen.png")));
     QFont f = app.font();
     f.setFamily(QStringLiteral("Microsoft YaHei UI"));
     f.setPointSize(9);
