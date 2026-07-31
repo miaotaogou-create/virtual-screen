@@ -26,6 +26,7 @@ SM_YVIRTUALSCREEN = 77
 SRCCOPY = 0x00CC0020
 HALFTONE = 4
 COLORONCOLOR = 3  # 预览缩小用，比 HALFTONE 轻
+WHITENESS = 0x00FF0062
 
 QDC_ONLY_ACTIVE_PATHS = 0x00000002
 DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE = 1
@@ -424,6 +425,60 @@ def set_dpi_scale(device_name: str, scale_percent: int) -> None:
             raise RuntimeError(f"设置 DPI 失败 {device_name}: {rc}")
         return
     raise RuntimeError(f"未找到显示源: {device_name}")
+
+
+def blit_monitor_to_hwnd(
+    mon: MonitorInfo,
+    hwnd: int,
+    client_w: int,
+    client_h: int,
+    *,
+    bg_colorref: int = 0x0020120B,
+) -> None:
+    """把监视器画面按比例 StretchBlt 到目标窗口客户区（GDI，无像素拷贝到 Python）。
+
+    bg_colorref: COLORREF，字节序为 0x00bbggrr。
+    """
+    ensure_dpi_aware()
+    if hwnd <= 0 or client_w < 2 or client_h < 2:
+        return
+    hdc_dst = user32.GetDC(hwnd)
+    if not hdc_dst:
+        raise RuntimeError("GetDC(hwnd) 失败")
+    hdc_src = user32.GetDC(0)
+    if not hdc_src:
+        user32.ReleaseDC(hwnd, hdc_dst)
+        raise RuntimeError("GetDC(0) 失败")
+    brush = gdi32.CreateSolidBrush(bg_colorref)
+    try:
+        rc = RECT(0, 0, client_w, client_h)
+        user32.FillRect(hdc_dst, ctypes.byref(rc), brush)
+        fit = min(client_w / max(1, mon.width), client_h / max(1, mon.height))
+        dw = max(1, int(mon.width * fit))
+        dh = max(1, int(mon.height * fit))
+        dx = (client_w - dw) // 2
+        dy = (client_h - dh) // 2
+        gdi32.SetStretchBltMode(hdc_dst, COLORONCOLOR)
+        ok = gdi32.StretchBlt(
+            hdc_dst,
+            dx,
+            dy,
+            dw,
+            dh,
+            hdc_src,
+            mon.left,
+            mon.top,
+            mon.width,
+            mon.height,
+            SRCCOPY,
+        )
+        if not ok:
+            raise RuntimeError("StretchBlt 失败")
+    finally:
+        if brush:
+            gdi32.DeleteObject(brush)
+        user32.ReleaseDC(0, hdc_src)
+        user32.ReleaseDC(hwnd, hdc_dst)
 
 
 def capture_monitor_rgb(mon: MonitorInfo, out_w: int, out_h: int) -> bytes:

@@ -19,10 +19,12 @@ class App(tk.Tk):
         theme.apply_theme(self)
 
         self.cfg: dict[str, Any] = cfgmod.load_config()
+        # 默认 2 秒一帧；预览改走 GDI，不再用 PhotoImage（那会把整机拖死）
         self.cfg.setdefault("preview_fps", 1)
-        self.cfg.setdefault("preview_max_height", 540)
+        self.cfg.setdefault("preview_interval_ms", 2000)
+        # 默认关预览：开着旧版 PhotoImage 会拖死整机；需要时点「预览:关」打开
+        self._preview_enabled = False
 
-        self._photos: list[tk.PhotoImage] = []
         self._preview_index = 0
         self._preview_target_keys: list[str] = []
         self._tab_btns: list[tk.Label] = []
@@ -31,6 +33,8 @@ class App(tk.Tk):
         self._busy = False
         self.row_vars: list[dict[str, tk.Variable]] = []
         self._chrome: chrome.TitleChrome | None = None
+        self._cached_targets: list[win_display.MonitorInfo] = []
+        self._cached_targets_at = 0.0
 
         self._build()
         self._load_fields_from_cfg()
@@ -64,17 +68,60 @@ class App(tk.Tk):
         self.preview_host = ttk.Frame(self.body, style="Preview.TFrame")
         self.preview_host.place(relx=0, rely=0, relwidth=1, relheight=1)
 
-        # 一次只预览一块屏；顶栏 Tab 切换，中间区域尽量放大
+        # 一次只预览一块屏；顶栏 Tab 切换；中间用 GDI 铺满（勿用 PhotoImage）
         self.tab_bar = tk.Frame(self.preview_host, bg=theme.C["preview_bg"], height=40)
         self.tab_bar.pack(fill=tk.X, padx=10, pady=(10, 0))
         self.tab_bar.pack_propagate(False)
+        self.tab_tabs = tk.Frame(self.tab_bar, bg=theme.C["preview_bg"])
+        self.tab_tabs.pack(side=tk.LEFT, fill=tk.Y)
+        self.preview_toggle = tk.Label(
+            self.tab_bar,
+            text="预览:关",
+            font=theme.font(9),
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            bg="#334155",
+            fg="#FFFFFF",
+            highlightthickness=1,
+            highlightbackground="#334155",
+            bd=0,
+        )
+        self.preview_toggle.pack(side=tk.RIGHT, padx=(0, 4), pady=4)
+        self.preview_toggle.bind("<Button-1>", lambda _e: self._toggle_preview())
 
         stage = ttk.Frame(self.preview_host, style="Preview.TFrame", padding=(10, 8, 10, 10))
         stage.pack(fill=tk.BOTH, expand=True)
-        self.preview_cap = ttk.Label(stage, text="", style="Caption.TLabel")
+        self.preview_cap = ttk.Label(
+            stage,
+            text="预览默认关闭，避免拖慢整机。需要看画面时点右上角「预览:关」打开。",
+            style="Caption.TLabel",
+        )
         self.preview_cap.pack(anchor=tk.W)
-        self.preview_label = ttk.Label(stage, style="Caption.TLabel", anchor="center")
-        self.preview_label.pack(fill=tk.BOTH, expand=True)
+        # 纯 Frame 作为 GDI 画布；Label+PhotoImage 大图会拖死系统
+        self.preview_surface = tk.Frame(stage, bg=theme.C["preview_bg"], highlightthickness=0)
+        self.preview_surface.pack(fill=tk.BOTH, expand=True)
+        self._blit_after: str | None = None
+
+        def _schedule_blit(_event=None) -> None:
+            if self._blit_after:
+                try:
+                    self.after_cancel(self._blit_after)
+                except Exception:
+                    pass
+            self._blit_after = self.after(80, lambda: self._blit_preview(force_meta=False))
+
+        self.preview_surface.bind("<Configure>", _schedule_blit)
+        self.preview_surface.bind("<Expose>", _schedule_blit)
+        self.preview_hint = tk.Label(
+            self.preview_surface,
+            text="预览已关闭（省性能）\n点右上角「预览:关」打开后，画面会铺满此区域",
+            bg=theme.C["preview_bg"],
+            fg="#94A3B8",
+            font=theme.font(11),
+            justify="center",
+        )
+        self.preview_hint.place(relx=0.5, rely=0.5, anchor="center")
 
         self.settings_panel = ttk.Frame(self.body, style="Surface.TFrame", padding=16)
 
@@ -331,17 +378,33 @@ class App(tk.Tk):
         self.list_box.insert(tk.END, "\n".join(lines) or "（无）")
         self.status.set(self._status_line())
 
+    def _toggle_preview(self) -> None:
+        self._preview_enabled = not self._preview_enabled
+        self.preview_toggle.configure(
+            text="预览:开" if self._preview_enabled else "预览:关",
+            bg=theme.C["primary"] if self._preview_enabled else "#334155",
+        )
+        if self._preview_enabled:
+            self.preview_hint.place_forget()
+            self._blit_preview(force_meta=True)
+        else:
+            self.preview_hint.configure(text="预览已关闭（省性能）\n点右上角「预览:关」可重新打开")
+            self.preview_hint.place(relx=0.5, rely=0.5, anchor="center")
+            self.status.set("预览已关闭")
+
     def _tick_preview(self) -> None:
         try:
-            # 最小化时不抓屏，省 CPU
-            if self.state() == "iconic":
-                pass
-            else:
-                self._draw_preview()
+            if self.state() != "iconic" and self._preview_enabled and not self._busy:
+                self._blit_preview(force_meta=True)
         except Exception as e:
             self.status.set(f"预览异常: {e}")
-        fps = max(1, int(self.cfg.get("preview_fps", 1)))
-        self._preview_job = self.after(int(1000 / fps), self._tick_preview)
+        # 优先 interval；兼容旧 preview_fps
+        interval = int(self.cfg.get("preview_interval_ms") or 0)
+        if interval <= 0:
+            fps = max(1, int(self.cfg.get("preview_fps", 1)))
+            interval = int(1000 / fps)
+        interval = max(500, interval)
+        self._preview_job = self.after(interval, self._tick_preview)
 
     def _monitor_title(self, mon: win_display.MonitorInfo) -> str:
         title = f"{mon.device_name}  {mon.width}×{mon.height}"
@@ -362,7 +425,6 @@ class App(tk.Tk):
             return ""
         if scale <= 100:
             return ""
-        # 系统逻辑像素 ≈ 物理 / (scale/100)
         lw = max(1, round(pw * 100 / scale))
         lh = max(1, round(ph * 100 / scale))
         if mon.width == lw and mon.height == lh:
@@ -381,10 +443,7 @@ class App(tk.Tk):
             return
         self._preview_index = index
         self._refresh_tab_styles()
-        try:
-            self._draw_preview()
-        except Exception as e:
-            self.status.set(f"预览异常: {e}")
+        self._blit_preview(force_meta=True)
 
     def _refresh_tab_styles(self) -> None:
         for i, btn in enumerate(self._tab_btns):
@@ -395,19 +454,29 @@ class App(tk.Tk):
                 highlightbackground=theme.C["primary"] if active else "#334155",
             )
 
+    def _preview_targets_cached(self) -> list[win_display.MonitorInfo]:
+        import time
+
+        now = time.time()
+        if now - self._cached_targets_at < 1.0 and self._cached_targets:
+            return self._cached_targets
+        self._cached_targets = win_display.preview_targets(prefer_virtual=True)
+        self._cached_targets_at = now
+        return self._cached_targets
+
     def _sync_preview_tabs(self, targets: list[win_display.MonitorInfo]) -> None:
         keys = [f"{m.device_name}:{m.width}x{m.height}" for m in targets]
         if keys == self._preview_target_keys and len(self._tab_btns) == len(targets):
             return
         self._preview_target_keys = keys
-        for w in self.tab_bar.winfo_children():
+        for w in self.tab_tabs.winfo_children():
             w.destroy()
         self._tab_btns.clear()
         if self._preview_index >= len(targets):
             self._preview_index = max(0, len(targets) - 1)
         for i, mon in enumerate(targets):
             btn = tk.Label(
-                self.tab_bar,
+                self.tab_tabs,
                 text=self._tab_label(mon, i),
                 font=theme.font(9),
                 padx=14,
@@ -422,43 +491,37 @@ class App(tk.Tk):
             self._tab_btns.append(btn)
         self._refresh_tab_styles()
 
-    def _draw_preview(self) -> None:
-        targets = win_display.preview_targets(prefer_virtual=True)
+    def _blit_preview(self, force_meta: bool = True) -> None:
+        if not self._preview_enabled:
+            return
+        targets = self._preview_targets_cached()
         self.update_idletasks()
-        host_w = max(320, self.preview_label.winfo_width() or self.preview_host.winfo_width() - 20)
-        host_h = max(240, self.preview_label.winfo_height() or (self.preview_host.winfo_height() - 70))
+        host_w = max(2, self.preview_surface.winfo_width())
+        host_h = max(2, self.preview_surface.winfo_height())
         if not targets:
-            self._sync_preview_tabs([])
-            self.preview_cap.configure(text="没有可预览的监视器")
-            self.preview_label.configure(image="", text="")
-            self.footer_info.set("")
-            self._photos = []
+            if force_meta:
+                self._sync_preview_tabs([])
+                self.preview_cap.configure(text="没有可预览的监视器")
+                self.footer_info.set("")
             return
 
-        self._sync_preview_tabs(targets)
+        if force_meta:
+            self._sync_preview_tabs(targets)
         idx = min(self._preview_index, len(targets) - 1)
         self._preview_index = idx
         mon = targets[idx]
-        title = self._monitor_title(mon)
-        tip = self._logical_tip(mon)
-        self.preview_cap.configure(text=title + (f"  ·  {tip}" if tip else ""))
-        foot_bits = [self._monitor_title(m) for m in targets]
-        self.footer_info.set(f"预览 {idx + 1}/{len(targets)}  ·  " + "  |  ".join(foot_bits))
+        if force_meta:
+            tip = self._logical_tip(mon)
+            self.preview_cap.configure(text=self._monitor_title(mon) + (f"  ·  {tip}" if tip else ""))
+            foot_bits = [self._monitor_title(m) for m in targets]
+            self.footer_info.set(f"预览 {idx + 1}/{len(targets)}  ·  " + "  |  ".join(foot_bits))
 
-        # 预览限高，避免按整屏分辨率反复编码拖垮本机
-        max_h = max(240, int(self.cfg.get("preview_max_height", 540)))
-        scale = min(host_w / max(1, mon.width), host_h / max(1, mon.height), max_h / max(1, mon.height), 1.0)
-        out_w = max(1, int(mon.width * scale))
-        out_h = max(1, int(mon.height * scale))
         try:
-            rgb = win_display.capture_monitor_rgb(mon, out_w, out_h)
-            ppm = win_display.rgb_to_ppm(rgb, out_w, out_h)
-            img = tk.PhotoImage(data=ppm)
-            self.preview_label.configure(image=img, text="")
-            self._photos = [img]  # 防 GC
+            hwnd = int(self.preview_surface.winfo_id())
+            # 自适应铺满客户区（等比，类似 VMware Fit）
+            win_display.blit_monitor_to_hwnd(mon, hwnd, host_w, host_h)
         except Exception as e:
-            self.preview_label.configure(image="", text=f"抓屏失败: {e}")
-            self._photos = []
+            self.status.set(f"预览异常: {e}")
 
 
 def main() -> None:

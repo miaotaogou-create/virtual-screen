@@ -23,8 +23,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         {"width": 1920, "height": 1080, "scale": 100, "hz": 60, "label": "虚拟屏1"},
         {"width": 1920, "height": 1080, "scale": 100, "hz": 60, "label": "虚拟屏2"},
     ],
-    "preview_max_height": 540,
     "preview_fps": 1,
+    "preview_interval_ms": 2000,
     "vdd_settings_path": r"C:\VirtualDisplayDriver\vdd_settings.xml",
 }
 
