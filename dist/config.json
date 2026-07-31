@@ -15,6 +15,6 @@
       "hz": 60
     }
   ],
-  "preview_interval_ms": 1000,
+  "preview_interval_ms": 2000,
   "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml"
 }

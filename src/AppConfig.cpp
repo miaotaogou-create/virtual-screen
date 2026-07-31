@@ -24,6 +24,7 @@ AppConfig AppConfig::defaults()
     DisplaySpec b = a;
     b.label = QStringLiteral("虚拟屏2");
     c.displays = {a, b};
+    c.previewIntervalMs = 2000;
     return c;
 }
 
@@ -37,7 +38,7 @@ AppConfig AppConfig::load()
         return defaults();
     const QJsonObject o = doc.object();
     AppConfig c = defaults();
-    c.previewIntervalMs = o.value(QStringLiteral("preview_interval_ms")).toInt(1000);
+    c.previewIntervalMs = o.value(QStringLiteral("preview_interval_ms")).toInt(2000);
     c.vddSettingsPath = o.value(QStringLiteral("vdd_settings_path")).toString(c.vddSettingsPath);
     const QJsonArray arr = o.value(QStringLiteral("displays")).toArray();
     if (!arr.isEmpty()) {

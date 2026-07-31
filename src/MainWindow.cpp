@@ -46,22 +46,18 @@ MainWindow::MainWindow(QWidget *parent)
     m_tabLay->setContentsMargins(8, 2, 8, 2);
     m_tabLay->setSpacing(4);
     m_tabLay->addStretch();
-    m_previewToggle = new QPushButton(QStringLiteral("预览:开"), m_tabBar);
+    m_previewToggle = new QPushButton(QStringLiteral("预览:关"), m_tabBar);
     m_previewToggle->setFlat(true);
     m_previewToggle->setCursor(Qt::PointingHandCursor);
     m_previewToggle->setStyleSheet(QStringLiteral(
-        "QPushButton { color:#fff; background:#0F766E; padding:2px 10px; border:none; }"
-        "QPushButton:hover { background:#0D9488; }"));
+        "QPushButton { color:#fff; background:#334155; padding:2px 10px; border:none; }"
+        "QPushButton:hover { background:#475569; }"));
     m_tabLay->addWidget(m_previewToggle);
     root->addWidget(m_tabBar);
 
-    m_cap = new QLabel(this);
-    m_cap->setStyleSheet(QStringLiteral("color:#94A3B8; padding:2px 10px; background:#0B1220;"));
-    m_cap->setFixedHeight(18);
-    root->addWidget(m_cap);
-
     m_preview = new PreviewPane(this);
     root->addWidget(m_preview, 1);
+    m_preview->setPlaceholder(QStringLiteral("预览默认关闭（更流畅）\n需要看画面时点右上角「预览:关」打开"));
 
     m_settings = new SettingsPanel(this);
     m_settings->hide();
@@ -82,10 +78,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_timer = new QTimer(this);
     connect(m_timer, &QTimer::timeout, this, &MainWindow::refreshPreview);
-    m_timer->start(qMax(500, m_cfg.previewIntervalMs));
+    m_timer->start(qMax(1500, m_cfg.previewIntervalMs));
 
     rebuildTabs();
-    refreshPreview();
 }
 
 void MainWindow::changeEvent(QEvent *e)
@@ -124,6 +119,11 @@ void MainWindow::rebuildTabs()
         btn->setStyleSheet(active
             ? QStringLiteral("QPushButton { color:#fff; background:#0F766E; padding:2px 12px; border:none; }")
             : QStringLiteral("QPushButton { color:#94A3B8; background:transparent; padding:2px 12px; border:1px solid #334155; }"));
+        btn->setToolTip(QStringLiteral("%1  %2×%3%4")
+                            .arg(targets[i].deviceName)
+                            .arg(targets[i].geometry.width())
+                            .arg(targets[i].geometry.height())
+                            .arg(targets[i].likelyVirtual ? QStringLiteral(" · 虚拟") : QString()));
         m_tabLay->insertWidget(m_tabLay->count() - 2, btn);
         connect(btn, &QPushButton::clicked, this, [this, i]() { selectTab(i); });
         m_tabs.push_back(btn);
@@ -255,31 +255,45 @@ void MainWindow::onClear()
 
 QPixmap MainWindow::grabMonitor(const MonitorInfo &mon) const
 {
-    // 用虚拟桌面坐标匹配 QScreen，再 grab（Qt 路径，避免 Tk/GDI 抢绘）
+    QPixmap pm;
     const QList<QScreen *> screens = QGuiApplication::screens();
     for (QScreen *s : screens) {
         if (s->geometry() == mon.geometry || s->name().contains(mon.deviceName.section(QLatin1Char('.'), -1))) {
-            return s->grabWindow(0);
+            pm = s->grabWindow(0);
+            break;
         }
     }
-    for (QScreen *s : screens) {
-        if (s->geometry().intersects(mon.geometry.adjusted(8, 8, -8, -8)))
-            return s->grabWindow(0);
+    if (pm.isNull()) {
+        for (QScreen *s : screens) {
+            if (s->geometry().intersects(mon.geometry.adjusted(8, 8, -8, -8))) {
+                pm = s->grabWindow(0);
+                break;
+            }
+        }
     }
-    if (!screens.isEmpty())
-        return screens.first()->grabWindow(0);
-    return {};
+    if (pm.isNull() && !screens.isEmpty())
+        pm = screens.first()->grabWindow(0);
+    if (pm.isNull())
+        return {};
+
+    // 抓完立刻缩到预览区大小，避免整屏位图常驻 + paint 再平滑缩放
+    const QSize target = m_preview ? m_preview->size() : QSize(960, 600);
+    if (target.width() > 1 && target.height() > 1
+        && (pm.width() > target.width() || pm.height() > target.height())) {
+        pm = pm.scaled(target, Qt::KeepAspectRatio, Qt::FastTransformation);
+    }
+    return pm;
 }
 
 void MainWindow::refreshPreview()
 {
-    if (!m_previewOn) {
-        m_preview->setPlaceholder(QStringLiteral("预览已关闭\n点右上角打开"));
+    if (!m_previewOn)
         return;
-    }
+    if (m_grabBusy || isMinimized() || !isVisible())
+        return;
+
     const auto targets = WinDisplay::previewTargets(true);
     if (targets.isEmpty()) {
-        m_cap->setText(QStringLiteral("没有可预览的监视器"));
         m_preview->setPlaceholder(QStringLiteral("没有可预览的监视器\n请先「应用」虚拟屏"));
         return;
     }
@@ -287,12 +301,16 @@ void MainWindow::refreshPreview()
         rebuildTabs();
     m_tabIndex = qBound(0, m_tabIndex, targets.size() - 1);
     const MonitorInfo &mon = targets[m_tabIndex];
-    m_cap->setText(QStringLiteral("%1  %2×%3%4")
-                       .arg(mon.deviceName)
-                       .arg(mon.geometry.width())
-                       .arg(mon.geometry.height())
-                       .arg(mon.likelyVirtual ? QStringLiteral("  · 虚拟") : QString()));
+
+    // 设备信息放标题栏 / Tab 提示，不占预览高度
+    m_title->setStatusHint(QStringLiteral("%1  %2×%3")
+                               .arg(mon.deviceName)
+                               .arg(mon.geometry.width())
+                               .arg(mon.geometry.height()));
+
+    m_grabBusy = true;
     const QPixmap pm = grabMonitor(mon);
+    m_grabBusy = false;
     if (pm.isNull())
         m_preview->setPlaceholder(QStringLiteral("抓屏失败"));
     else

@@ -46,13 +46,13 @@ private:
     QWidget *m_tabBar = nullptr;
     QHBoxLayout *m_tabLay = nullptr;
     QPushButton *m_previewToggle = nullptr;
-    QLabel *m_cap = nullptr;
     PreviewPane *m_preview = nullptr;
     SettingsPanel *m_settings = nullptr;
     VddService *m_vdd = nullptr;
     QTimer *m_timer = nullptr;
     QVector<QPushButton *> m_tabs;
     int m_tabIndex = 0;
-    bool m_previewOn = true;
+    bool m_previewOn = false; // 默认关：抓屏贵，需要时再开
     bool m_busy = false;
+    bool m_grabBusy = false;
 };

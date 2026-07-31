@@ -1,7 +1,7 @@
 #pragma once
 
-#include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 struct DisplaySpec {
@@ -14,7 +14,7 @@ struct DisplaySpec {
 
 struct AppConfig {
     QVector<DisplaySpec> displays;
-    int previewIntervalMs = 1000;
+    int previewIntervalMs = 2000;
     QString vddSettingsPath = QStringLiteral("C:/VirtualDisplayDriver/vdd_settings.xml");
 
     static AppConfig defaults();

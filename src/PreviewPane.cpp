@@ -1,6 +1,7 @@
 #include "PreviewPane.h"
 
 #include <QPainter>
+#include <QResizeEvent>
 
 PreviewPane::PreviewPane(QWidget *parent)
     : QWidget(parent)
@@ -11,7 +12,8 @@ PreviewPane::PreviewPane(QWidget *parent)
 
 void PreviewPane::setPixmap(const QPixmap &pm)
 {
-    m_pm = pm;
+    m_source = pm;
+    m_scaled = QPixmap();
     if (!pm.isNull())
         m_placeholder.clear();
     update();
@@ -20,19 +22,38 @@ void PreviewPane::setPixmap(const QPixmap &pm)
 void PreviewPane::setPlaceholder(const QString &text)
 {
     m_placeholder = text;
-    m_pm = QPixmap();
+    m_source = QPixmap();
+    m_scaled = QPixmap();
     update();
+}
+
+void PreviewPane::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    m_scaled = QPixmap();
+}
+
+void PreviewPane::ensureScaled()
+{
+    if (m_source.isNull() || size().width() < 2 || size().height() < 2)
+        return;
+    if (!m_scaled.isNull())
+        return;
+    // Fast：预览够用；Smooth 每帧/每次 paint 会明显卡
+    m_scaled = m_source.scaled(size(), Qt::KeepAspectRatio, Qt::FastTransformation);
 }
 
 void PreviewPane::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
     p.fillRect(rect(), QColor(0x0B, 0x12, 0x20));
-    if (!m_pm.isNull()) {
-        const QPixmap scaled = m_pm.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        const int x = (width() - scaled.width()) / 2;
-        const int y = (height() - scaled.height()) / 2;
-        p.drawPixmap(x, y, scaled);
+    if (!m_source.isNull()) {
+        ensureScaled();
+        if (!m_scaled.isNull()) {
+            const int x = (width() - m_scaled.width()) / 2;
+            const int y = (height() - m_scaled.height()) / 2;
+            p.drawPixmap(x, y, m_scaled);
+        }
         return;
     }
     if (!m_placeholder.isEmpty()) {

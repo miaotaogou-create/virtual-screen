@@ -4,23 +4,40 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPalette>
 #include <QPushButton>
 #include <QVBoxLayout>
 
 SettingsPanel::SettingsPanel(QWidget *parent)
     : QWidget(parent)
 {
+    // 侧栏抽屉：必须实底，否则会透出后面的预览
+    setObjectName(QStringLiteral("SettingsPanel"));
+    setAttribute(Qt::WA_StyledBackground, true);
+    setAutoFillBackground(true);
+    QPalette pal = palette();
+    pal.setColor(QPalette::Window, QColor(0xFF, 0xFF, 0xFF));
+    pal.setColor(QPalette::Base, QColor(0xFF, 0xFF, 0xFF));
+    setPalette(pal);
+
     setStyleSheet(QStringLiteral(
-        "SettingsPanel { background:#FFFFFF; }"
-        "QLabel { color:#0F1C2E; }"
-        "QLineEdit { padding:4px; border:1px solid #D8E0EA; border-radius:2px; }"
-        "QPushButton { padding:6px 12px; }"));
+        "#SettingsPanel {"
+        "  background-color:#FFFFFF;"
+        "  border-left:1px solid #D8E0EA;"
+        "}"
+        "#SettingsPanel QLabel { color:#0F1C2E; background:transparent; }"
+        "#SettingsPanel QLineEdit {"
+        "  padding:4px; border:1px solid #D8E0EA; border-radius:2px;"
+        "  background:#F7FAFC; color:#0F1C2E;"
+        "}"
+        "#SettingsPanel QPushButton { padding:6px 12px; background:#EEF2F6; border:1px solid #D8E0EA; }"
+        "#SettingsPanel QPushButton:hover { background:#CCFBF1; }"));
 
     auto *lay = new QVBoxLayout(this);
     lay->setContentsMargins(14, 12, 14, 12);
     lay->setSpacing(8);
 
-    auto *title = new QLabel(QStringLiteral("虚拟屏规格"), this);
+    auto *title = new QLabel(QStringLiteral("设置（侧栏）"), this);
     title->setStyleSheet(QStringLiteral("font-weight:600; color:#0F766E;"));
     lay->addWidget(title);
     lay->addWidget(new QLabel(QStringLiteral("物理像素 × 缩放；应用后被测程序按此逻辑分辨率运行。布局测试建议缩放 100%。"), this));
