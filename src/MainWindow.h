@@ -1,0 +1,54 @@
+#pragma once
+
+#include "AppConfig.h"
+#include "WinDisplay.h"
+
+#include <QWidget>
+#include <functional>
+
+class TitleBar;
+class PreviewPane;
+class SettingsPanel;
+class VddService;
+class QPushButton;
+class QLabel;
+class QTimer;
+class QHBoxLayout;
+
+class MainWindow : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget *parent = nullptr);
+
+public slots:
+    void onApply();
+    void onClear();
+
+private slots:
+    void toggleSettings();
+    void onSaveSettings();
+    void togglePreview();
+    void refreshPreview();
+    void selectTab(int index);
+
+private:
+    void rebuildTabs();
+    void runBg(const std::function<QString()> &work, const QString &title);
+    QPixmap grabMonitor(const MonitorInfo &mon) const;
+
+    AppConfig m_cfg;
+    TitleBar *m_title = nullptr;
+    QWidget *m_tabBar = nullptr;
+    QHBoxLayout *m_tabLay = nullptr;
+    QPushButton *m_previewToggle = nullptr;
+    QLabel *m_cap = nullptr;
+    PreviewPane *m_preview = nullptr;
+    SettingsPanel *m_settings = nullptr;
+    VddService *m_vdd = nullptr;
+    QTimer *m_timer = nullptr;
+    QVector<QPushButton *> m_tabs;
+    int m_tabIndex = 0;
+    bool m_previewOn = true;
+    bool m_busy = false;
+};

@@ -1,28 +1,33 @@
 # virtual-screen
 
-**原生窗口绿色单文件**：拷贝 `dist\VirtualScreen.exe` 到任意目录双击即可（不装 Python）。
+本机虚拟屏控制与预览工具（**Qt Widgets / C++**）。
 
-做法对齐 `qt-arm64-cross`：PyInstaller `--onefile`；Tcl/Tk 首次运行拷到 `%LOCALAPPDATA%\VirtualScreen\`，避开 `C:\WINDOWS\TEMP` 下 Tcl 拒读 `init.tcl`。
+中间预览区尽量铺满；标题栏约 28px；**无底部状态栏**（状态写在标题栏右侧）。
 
-## 怎么用
+## 运行
 
-1. 双击 `VirtualScreen.exe`（原生 GUI）
-2. 主界面以**预览为主**；点右上角 **设置** 再改分辨率/缩放、装驱动
-3. **应用** 后把被测程序拖到虚拟屏，在大预览区观察
-4. **清除** 可关掉虚拟屏
+编译产物在 `dist\`（含 Qt DLL）：
 
-顶栏可直接「应用 / 清除」；参数不常驻主画面，避免挤占预览。
-
-## 重新打包
-
-```powershell
-pip install pyinstaller
-.\build_exe.ps1
+```text
+dist\VirtualScreen.exe
 ```
 
-脚本会做：本目录 smoke、空目录 smoke、GUI 存活自检。
+双击运行。需要改分辨率/清虚拟屏时会提权（UAC）。
+
+- **应用 / 清除 / 设置**：顶栏
+- **虚拟屏 Tab**：切换预览目标；画面等比铺满中间区域（类似 VMware Fit）
+- **预览:开/关**：可关掉抓屏以再省一点资源
+
+## 编译
+
+依赖：Qt 5.14（msvc2017_64）+ VS2019。
+
+```powershell
+.\build_qt.ps1
+```
 
 ## 说明
 
-- 改显示配置 / 装驱动需要管理员。程序**启动时提权一次**（弹一次 UAC），之后本会话内应用/清除一般不再反复弹窗。
-- Windows **不能**让程序静默自动点同意 UAC；若需完全不弹，只能在系统里关闭 UAC（不推荐）或以管理员账户长期登录。
+- 虚拟显示依赖已安装的 [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)
+- 布局测试建议缩放 **100%**，否则逻辑分辨率变小，被测 UI 可能裁切
+- 旧版 Python/tkinter 实现已不再维护，源码可参考仓库历史

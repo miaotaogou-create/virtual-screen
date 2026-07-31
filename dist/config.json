@@ -1,0 +1,20 @@
+{
+  "displays": [
+    {
+      "label": "虚拟屏1",
+      "width": 1920,
+      "height": 1200,
+      "scale": 100,
+      "hz": 60
+    },
+    {
+      "label": "虚拟屏2",
+      "width": 1920,
+      "height": 1200,
+      "scale": 100,
+      "hz": 60
+    }
+  ],
+  "preview_interval_ms": 1000,
+  "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml"
+}
