@@ -38,6 +38,10 @@ class App(tk.Tk):
 
         self._build()
         self._load_fields_from_cfg()
+        try:
+            self._sync_preview_tabs(self._preview_targets_cached())
+        except Exception:
+            pass
         self._tick_preview()
         if startup_action:
             self.after(200, lambda: self._run_startup_action(startup_action))

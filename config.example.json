@@ -15,6 +15,7 @@
       "label": "虚拟屏2"
     }
   ],
+  "preview_interval_ms": 2000,
   "preview_fps": 1,
   "vdd_settings_path": "C:\\VirtualDisplayDriver\\vdd_settings.xml"
 }
