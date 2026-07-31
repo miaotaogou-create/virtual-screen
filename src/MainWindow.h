@@ -25,6 +25,10 @@ public slots:
     void onApply();
     void onClear();
 
+protected:
+    void changeEvent(QEvent *e) override;
+    void resizeEvent(QResizeEvent *e) override;
+
 private slots:
     void toggleSettings();
     void onSaveSettings();

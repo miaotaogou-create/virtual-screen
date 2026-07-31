@@ -6,11 +6,13 @@
 #include "TitleBar.h"
 #include "VddService.h"
 
+#include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScreen>
 #include <QThread>
 #include <QTimer>
@@ -84,6 +86,22 @@ MainWindow::MainWindow(QWidget *parent)
 
     rebuildTabs();
     refreshPreview();
+}
+
+void MainWindow::changeEvent(QEvent *e)
+{
+    QWidget::changeEvent(e);
+    if (e->type() == QEvent::WindowStateChange && m_title)
+        m_title->syncMaxButton();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    if (m_settings && m_settings->isVisible()) {
+        const int w = qMin(420, width() * 2 / 5);
+        m_settings->setGeometry(width() - w, m_title->height(), w, height() - m_title->height());
+    }
 }
 
 void MainWindow::rebuildTabs()

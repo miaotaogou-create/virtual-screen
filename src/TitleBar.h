@@ -5,12 +5,13 @@
 class QLabel;
 class QPushButton;
 
-/** 窄标题栏：高度约 28px，少占预览区。 */
+/** 窄标题栏：高度约 28px；含最小化 / 最大化(还原) / 关闭。 */
 class TitleBar : public QWidget
 {
     Q_OBJECT
 public:
     explicit TitleBar(QWidget *parent = nullptr);
+    void syncMaxButton();
 
 signals:
     void applyClicked();
@@ -25,10 +26,14 @@ public slots:
 protected:
     void mousePressEvent(QMouseEvent *e) override;
     void mouseMoveEvent(QMouseEvent *e) override;
+    void mouseDoubleClickEvent(QMouseEvent *e) override;
 
 private:
+    void toggleMaxRestore();
+
     QLabel *m_title = nullptr;
     QLabel *m_hint = nullptr;
+    QPushButton *m_maxBtn = nullptr;
     QPoint m_dragPos;
     bool m_dragging = false;
 };
