@@ -59,8 +59,7 @@ MainWindow::MainWindow(QWidget *parent)
     root->addWidget(m_preview, 1);
     m_preview->setPlaceholder(QStringLiteral("预览默认关闭（更流畅）\n需要看画面时点右上角「预览:关」打开"));
 
-    m_settings = new SettingsPanel(this);
-    m_settings->hide();
+    m_settings = new SettingsDialog(this);
     m_settings->loadFrom(m_cfg);
 
     connect(m_title, &TitleBar::applyClicked, this, &MainWindow::onApply);
@@ -68,10 +67,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_title, &TitleBar::settingsClicked, this, &MainWindow::toggleSettings);
     connect(m_title, &TitleBar::closeClicked, this, &QWidget::close);
     connect(m_previewToggle, &QPushButton::clicked, this, &MainWindow::togglePreview);
-    connect(m_settings, &SettingsPanel::applyRequested, this, &MainWindow::onApply);
-    connect(m_settings, &SettingsPanel::saveRequested, this, &MainWindow::onSaveSettings);
-    connect(m_settings, &SettingsPanel::clearRequested, this, &MainWindow::onClear);
-    connect(m_settings, &SettingsPanel::closeRequested, this, &MainWindow::toggleSettings);
+    connect(m_settings, &SettingsDialog::applyRequested, this, &MainWindow::onApply);
+    connect(m_settings, &SettingsDialog::saveRequested, this, &MainWindow::onSaveSettings);
+    connect(m_settings, &SettingsDialog::clearRequested, this, &MainWindow::onClear);
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
     });
@@ -93,10 +91,6 @@ void MainWindow::changeEvent(QEvent *e)
 void MainWindow::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
-    if (m_settings && m_settings->isVisible()) {
-        const int w = qMin(420, width() * 2 / 5);
-        m_settings->setGeometry(width() - w, m_title->height(), w, height() - m_title->height());
-    }
 }
 
 void MainWindow::rebuildTabs()
@@ -154,16 +148,8 @@ void MainWindow::togglePreview()
 
 void MainWindow::toggleSettings()
 {
-    if (m_settings->isVisible()) {
-        m_settings->hide();
-        return;
-    }
     m_settings->loadFrom(m_cfg);
-    const int w = qMin(420, width() * 2 / 5);
-    m_settings->setParent(this);
-    m_settings->setGeometry(width() - w, m_title->height(), w, height() - m_title->height());
-    m_settings->show();
-    m_settings->raise();
+    m_settings->exec();
 }
 
 void MainWindow::onSaveSettings()
@@ -280,7 +266,7 @@ QPixmap MainWindow::grabMonitor(const MonitorInfo &mon) const
     const QSize target = m_preview ? m_preview->size() : QSize(960, 600);
     if (target.width() > 1 && target.height() > 1
         && (pm.width() > target.width() || pm.height() > target.height())) {
-        pm = pm.scaled(target, Qt::KeepAspectRatio, Qt::FastTransformation);
+        pm = pm.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     return pm;
 }

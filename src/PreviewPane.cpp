@@ -40,7 +40,7 @@ void PreviewPane::ensureScaled()
     if (!m_scaled.isNull())
         return;
     // Fast：预览够用；Smooth 每帧/每次 paint 会明显卡
-    m_scaled = m_source.scaled(size(), Qt::KeepAspectRatio, Qt::FastTransformation);
+    m_scaled = m_source.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
 void PreviewPane::paintEvent(QPaintEvent *)

@@ -8,7 +8,8 @@
 
 class TitleBar;
 class PreviewPane;
-class SettingsPanel;
+class SettingsDialog;
+
 class VddService;
 class QPushButton;
 class QLabel;
@@ -47,7 +48,7 @@ private:
     QHBoxLayout *m_tabLay = nullptr;
     QPushButton *m_previewToggle = nullptr;
     PreviewPane *m_preview = nullptr;
-    SettingsPanel *m_settings = nullptr;
+    SettingsDialog *m_settings = nullptr;
     VddService *m_vdd = nullptr;
     QTimer *m_timer = nullptr;
     QVector<QPushButton *> m_tabs;

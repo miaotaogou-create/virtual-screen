@@ -2,17 +2,18 @@
 
 #include "AppConfig.h"
 
+#include <QDialog>
 #include <QVector>
-#include <QWidget>
 
 class QLineEdit;
 class QVBoxLayout;
 
-class SettingsPanel : public QWidget
+/** 设置对话框（模态）。 */
+class SettingsDialog : public QDialog
 {
     Q_OBJECT
 public:
-    explicit SettingsPanel(QWidget *parent = nullptr);
+    explicit SettingsDialog(QWidget *parent = nullptr);
 
     void loadFrom(const AppConfig &cfg);
     AppConfig toConfig(const AppConfig &base) const;
@@ -21,7 +22,6 @@ signals:
     void applyRequested();
     void saveRequested();
     void clearRequested();
-    void closeRequested();
 
 private:
     struct Row {

@@ -4,43 +4,35 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPalette>
 #include <QPushButton>
 #include <QVBoxLayout>
 
-SettingsPanel::SettingsPanel(QWidget *parent)
-    : QWidget(parent)
+SettingsDialog::SettingsDialog(QWidget *parent)
+    : QDialog(parent)
 {
-    // 侧栏抽屉：必须实底，否则会透出后面的预览
-    setObjectName(QStringLiteral("SettingsPanel"));
-    setAttribute(Qt::WA_StyledBackground, true);
-    setAutoFillBackground(true);
-    QPalette pal = palette();
-    pal.setColor(QPalette::Window, QColor(0xFF, 0xFF, 0xFF));
-    pal.setColor(QPalette::Base, QColor(0xFF, 0xFF, 0xFF));
-    setPalette(pal);
-
+    setWindowTitle(QStringLiteral("设置"));
+    setModal(true);
+    setMinimumWidth(480);
     setStyleSheet(QStringLiteral(
-        "#SettingsPanel {"
-        "  background-color:#FFFFFF;"
-        "  border-left:1px solid #D8E0EA;"
-        "}"
-        "#SettingsPanel QLabel { color:#0F1C2E; background:transparent; }"
-        "#SettingsPanel QLineEdit {"
+        "QDialog { background:#FFFFFF; }"
+        "QLabel { color:#0F1C2E; }"
+        "QLineEdit {"
         "  padding:4px; border:1px solid #D8E0EA; border-radius:2px;"
         "  background:#F7FAFC; color:#0F1C2E;"
         "}"
-        "#SettingsPanel QPushButton { padding:6px 12px; background:#EEF2F6; border:1px solid #D8E0EA; }"
-        "#SettingsPanel QPushButton:hover { background:#CCFBF1; }"));
+        "QPushButton { padding:6px 14px; background:#EEF2F6; border:1px solid #D8E0EA; }"
+        "QPushButton:hover { background:#CCFBF1; }"));
 
     auto *lay = new QVBoxLayout(this);
-    lay->setContentsMargins(14, 12, 14, 12);
-    lay->setSpacing(8);
+    lay->setContentsMargins(16, 14, 16, 14);
+    lay->setSpacing(10);
 
-    auto *title = new QLabel(QStringLiteral("设置（侧栏）"), this);
-    title->setStyleSheet(QStringLiteral("font-weight:600; color:#0F766E;"));
+    auto *title = new QLabel(QStringLiteral("虚拟屏规格"), this);
+    title->setStyleSheet(QStringLiteral("font-weight:600; color:#0F766E; font-size:13px;"));
     lay->addWidget(title);
-    lay->addWidget(new QLabel(QStringLiteral("物理像素 × 缩放；应用后被测程序按此逻辑分辨率运行。布局测试建议缩放 100%。"), this));
+    lay->addWidget(new QLabel(
+        QStringLiteral("物理像素 × 缩放；应用后被测程序按此逻辑分辨率运行。布局测试建议缩放 100%。"),
+        this));
 
     m_rows = new QVBoxLayout();
     lay->addLayout(m_rows);
@@ -56,15 +48,14 @@ SettingsPanel::SettingsPanel(QWidget *parent)
     btns->addStretch();
     btns->addWidget(close);
     lay->addLayout(btns);
-    lay->addStretch();
 
-    connect(apply, &QPushButton::clicked, this, &SettingsPanel::applyRequested);
-    connect(save, &QPushButton::clicked, this, &SettingsPanel::saveRequested);
-    connect(clear, &QPushButton::clicked, this, &SettingsPanel::clearRequested);
-    connect(close, &QPushButton::clicked, this, &SettingsPanel::closeRequested);
+    connect(apply, &QPushButton::clicked, this, &SettingsDialog::applyRequested);
+    connect(save, &QPushButton::clicked, this, &SettingsDialog::saveRequested);
+    connect(clear, &QPushButton::clicked, this, &SettingsDialog::clearRequested);
+    connect(close, &QPushButton::clicked, this, &QDialog::reject);
 }
 
-void SettingsPanel::rebuildRows(int count)
+void SettingsDialog::rebuildRows(int count)
 {
     while (m_rows->count() > 0) {
         QLayoutItem *it = m_rows->takeAt(0);
@@ -99,7 +90,7 @@ void SettingsPanel::rebuildRows(int count)
     }
 }
 
-void SettingsPanel::loadFrom(const AppConfig &cfg)
+void SettingsDialog::loadFrom(const AppConfig &cfg)
 {
     rebuildRows(cfg.displays.size());
     for (int i = 0; i < cfg.displays.size(); ++i) {
@@ -112,7 +103,7 @@ void SettingsPanel::loadFrom(const AppConfig &cfg)
     }
 }
 
-AppConfig SettingsPanel::toConfig(const AppConfig &base) const
+AppConfig SettingsDialog::toConfig(const AppConfig &base) const
 {
     AppConfig c = base;
     c.displays.clear();
