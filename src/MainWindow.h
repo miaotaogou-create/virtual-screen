@@ -34,7 +34,8 @@ private slots:
     void toggleSettings();
     void onSaveSettings();
     void onSaveAsSettings();
-    void onLoadSettings();
+    void onLoadProfile(const QString &path);
+    void onBrowseLoadSettings();
     void togglePreview();
     void refreshPreview();
     void selectTab(int index);

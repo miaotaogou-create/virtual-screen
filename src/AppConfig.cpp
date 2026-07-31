@@ -20,6 +20,15 @@ QString profilesDir()
     return dir;
 }
 
+QStringList listProfilePaths()
+{
+    QDir d(profilesDir());
+    QStringList out;
+    for (const QString &name : d.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
+        out << d.filePath(name);
+    return out;
+}
+
 static AppConfig parseObject(const QJsonObject &o)
 {
     AppConfig c = AppConfig::defaults();

@@ -29,3 +29,4 @@ struct AppConfig {
 
 QString configPath();
 QString profilesDir();
+QStringList listProfilePaths();

@@ -82,39 +82,88 @@ QString runHidden(const QString &program, const QStringList &args, int *exitCode
 
 QStringList findVddInstanceIds()
 {
-    int code = 0;
-    const QString out = runHidden(QStringLiteral("pnputil"),
-                                  {QStringLiteral("/enum-devices"), QStringLiteral("/connected")},
-                                  &code);
     QStringList ids;
-    QString curId;
-    QString curDesc;
-    const QStringList lines = out.split(QRegularExpression(QStringLiteral("[\r\n]")), Qt::SkipEmptyParts);
-    auto flush = [&]() {
-        const QString blob = (curDesc + QLatin1Char(' ') + curId).toLower();
-        if (blob.contains(QStringLiteral("virtual display"))
-            || blob.contains(QStringLiteral("mttvdd"))
-            || blob.contains(QStringLiteral("iddsample"))
-            || blob.contains(QStringLiteral("indirect display"))
-            || blob.contains(QStringLiteral("vdd by"))) {
-            if (!curId.isEmpty())
+
+    // 1) pnputil：中文系统字段是「实例 ID:」；编码偶发乱码时下面有兜底
+    {
+        int code = 0;
+        const QString out = runHidden(QStringLiteral("pnputil"),
+                                      {QStringLiteral("/enum-devices"), QStringLiteral("/class"), QStringLiteral("Display")},
+                                      &code);
+        QString curId;
+        QString curDesc;
+        const QStringList lines = out.split(QRegularExpression(QStringLiteral("[\r\n]")), QString::SkipEmptyParts);
+        auto isIdLine = [](const QString &line) {
+            const QString low = line.toLower();
+            return low.contains(QStringLiteral("instance id"))
+                || line.contains(QStringLiteral("实例 ID"))
+                || line.contains(QStringLiteral("实例ID"))
+                || line.contains(QStringLiteral("实例 id"));
+        };
+        auto isDescLine = [](const QString &line) {
+            const QString low = line.toLower();
+            return low.contains(QStringLiteral("device description"))
+                || line.contains(QStringLiteral("设备描述"));
+        };
+        auto flush = [&]() {
+            const QString blob = (curDesc + QLatin1Char(' ') + curId).toLower();
+            const bool byName = blob.contains(QStringLiteral("virtual display"))
+                || blob.contains(QStringLiteral("mttvdd"))
+                || blob.contains(QStringLiteral("iddsample"))
+                || blob.contains(QStringLiteral("indirect display"))
+                || blob.contains(QStringLiteral("vdd by"))
+                || blob.contains(QStringLiteral("mikethetech"));
+            const bool byRoot = curId.toUpper().startsWith(QStringLiteral("ROOT\\DISPLAY\\"));
+            if ((byName || byRoot) && !curId.isEmpty())
                 ids << curId;
+            curId.clear();
+            curDesc.clear();
+        };
+        for (QString line : lines) {
+            line = line.trimmed();
+            if (line.isEmpty())
+                continue;
+            if (isIdLine(line)) {
+                flush();
+                // 兼容半角/全角冒号
+                int colon = line.indexOf(QLatin1Char(':'));
+                if (colon < 0)
+                    colon = line.indexOf(QChar(0xFF1A));
+                curId = colon >= 0 ? line.mid(colon + 1).trimmed() : QString();
+            } else if (isDescLine(line)) {
+                int colon = line.indexOf(QLatin1Char(':'));
+                if (colon < 0)
+                    colon = line.indexOf(QChar(0xFF1A));
+                curDesc = colon >= 0 ? line.mid(colon + 1).trimmed() : QString();
+            }
         }
-        curId.clear();
-        curDesc.clear();
-    };
-    for (QString line : lines) {
-        line = line.trimmed();
-        const QString low = line.toLower();
-        if (low.startsWith(QStringLiteral("instance id:")) || low.contains(QStringLiteral("instance id:"))) {
-            flush();
-            curId = line.section(QLatin1Char(':'), 1).trimmed();
-        } else if (low.startsWith(QStringLiteral("device description:"))
-                   || low.startsWith(QStringLiteral("设备描述:"))) {
-            curDesc = line.section(QLatin1Char(':'), 1).trimmed();
+        flush();
+    }
+
+    // 2) PowerShell 兜底：不依赖 pnputil 本地化文案
+    if (ids.isEmpty()) {
+        int code = 0;
+        const QString out = runHidden(
+            QStringLiteral("powershell"),
+            {QStringLiteral("-NoProfile"), QStringLiteral("-Command"),
+             QStringLiteral("Get-PnpDevice -Class Display -ErrorAction SilentlyContinue |"
+                            " Where-Object { $_.FriendlyName -match 'Virtual Display|MttVDD|IddSample|Indirect Display|VDD by' } |"
+                            " ForEach-Object { $_.InstanceId }")},
+            &code);
+        for (QString line : out.split(QRegularExpression(QStringLiteral("[\r\n]")), QString::SkipEmptyParts)) {
+            line = line.trimmed();
+            if (line.contains(QLatin1Char('\\')))
+                ids << line;
         }
     }
-    flush();
+
+    // 3) 最后兜底：VDD 常见实例号
+    if (ids.isEmpty()) {
+        for (int i = 0; i < 4; ++i)
+            ids << QStringLiteral("ROOT\\DISPLAY\\%1").arg(i, 4, 10, QChar(QLatin1Char('0')));
+    }
+
+    ids.removeDuplicates();
     return ids;
 }
 
@@ -124,7 +173,18 @@ bool pnpSetEnabled(const QString &instanceId, bool enabled)
     runHidden(QStringLiteral("pnputil"),
               {enabled ? QStringLiteral("/enable-device") : QStringLiteral("/disable-device"), instanceId},
               &code);
-    return code == 0;
+    if (code == 0)
+        return true;
+
+    // 管理员下 pnputil 偶发失败时，用 PowerShell 再试一次
+    const QString cmd = enabled
+        ? QStringLiteral("Enable-PnpDevice -InstanceId '%1' -Confirm:$false").arg(instanceId)
+        : QStringLiteral("Disable-PnpDevice -InstanceId '%1' -Confirm:$false").arg(instanceId);
+    int psCode = 0;
+    runHidden(QStringLiteral("powershell"),
+              {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), cmd},
+              &psCode);
+    return psCode == 0;
 }
 
 } // namespace
@@ -154,15 +214,62 @@ QString VddService::installDriverHint() const
 
 QString VddService::clearVirtualDisplays()
 {
+    // 先把监视器数量写成 0，避免下次启用又冒出旧屏
+    {
+        AppConfig empty = AppConfig::defaults();
+        empty.displays.clear();
+        QFile f(empty.vddSettingsPath);
+        QDir().mkpath(QFileInfo(empty.vddSettingsPath).absolutePath());
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            // makeVddXml 要求至少有一块时才有意义；这里手写 count=0
+            f.write("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                    "<vdd_settings>\n  <monitors>\n    <count>0</count>\n  </monitors>\n"
+                    "  <global/>\n  <resolutions/>\n  <options>\n"
+                    "    <CustomEdid>false</CustomEdid>\n"
+                    "    <PreventSpoof>true</PreventSpoof>\n"
+                    "    <HardwareCursor>true</HardwareCursor>\n"
+                    "    <logging>false</logging>\n"
+                    "  </options>\n</vdd_settings>\n");
+        }
+    }
+
     const QStringList ids = findVddInstanceIds();
+    if (ids.isEmpty()) {
+        int left = 0;
+        for (const auto &m : WinDisplay::listMonitors()) {
+            if (m.likelyVirtual)
+                ++left;
+        }
+        if (left > 0)
+            return QStringLiteral("仍检测到 %1 块虚拟屏，但找不到驱动设备实例（清除失败）。").arg(left);
+        return QStringLiteral("未找到虚拟显示驱动设备（可能已清除）。");
+    }
+
+    emit progress(QStringLiteral("正在禁用虚拟显示驱动…"));
     int n = 0;
+    QStringList failed;
     for (const QString &id : ids) {
         if (pnpSetEnabled(id, false))
             ++n;
+        else
+            failed << id;
     }
-    if (n == 0)
-        return QStringLiteral("未找到可禁用的虚拟显示设备。");
-    return QStringLiteral("已禁用 %1 个虚拟显示设备。").arg(n);
+
+    QThread::msleep(800);
+    int left = 0;
+    for (const auto &m : WinDisplay::listMonitors()) {
+        if (m.likelyVirtual)
+            ++left;
+    }
+
+    QString msg = QStringLiteral("已请求禁用 %1 个虚拟显示设备。").arg(n);
+    if (!failed.isEmpty())
+        msg += QStringLiteral("\n禁用失败: %1").arg(failed.join(QStringLiteral(", ")));
+    if (left > 0)
+        msg += QStringLiteral("\n警告：系统仍枚举到 %1 块虚拟屏，桌面可能仍卡；可再试一次或重启。").arg(left);
+    else
+        msg += QStringLiteral("\n虚拟屏已从桌面移除。");
+    return msg;
 }
 
 QString VddService::applyConfig(const AppConfig &cfg, QString *detail)

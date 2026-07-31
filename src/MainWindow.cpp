@@ -73,7 +73,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_settings, &SettingsDialog::applyRequested, this, &MainWindow::onApply);
     connect(m_settings, &SettingsDialog::saveRequested, this, &MainWindow::onSaveSettings);
     connect(m_settings, &SettingsDialog::saveAsRequested, this, &MainWindow::onSaveAsSettings);
-    connect(m_settings, &SettingsDialog::loadRequested, this, &MainWindow::onLoadSettings);
+    connect(m_settings, &SettingsDialog::loadProfileRequested, this, &MainWindow::onLoadProfile);
+    connect(m_settings, &SettingsDialog::browseLoadRequested, this, &MainWindow::onBrowseLoadSettings);
     connect(m_settings, &SettingsDialog::clearRequested, this, &MainWindow::onClear);
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
@@ -106,11 +107,12 @@ void MainWindow::rebuildTabs()
     }
     m_tabs.clear();
 
-    const auto targets = WinDisplay::previewTargets(true);
-    for (int i = 0; i < targets.size(); ++i) {
-        const QString text = targets[i].likelyVirtual
-            ? QStringLiteral("虚拟屏 %1").arg(i + 1)
-            : targets[i].deviceName.section(QLatin1Char('\\'), -1);
+    // Tab 跟当前配置走，不跟系统里碰巧在线的监视器数量绑死
+    for (int i = 0; i < m_cfg.displays.size(); ++i) {
+        const DisplaySpec &spec = m_cfg.displays[i];
+        const QString text = spec.label.trimmed().isEmpty()
+                                 ? QStringLiteral("虚拟屏%1").arg(i + 1)
+                                 : spec.label.trimmed();
         auto *btn = new QPushButton(text, m_tabBar);
         btn->setFlat(true);
         btn->setCursor(Qt::PointingHandCursor);
@@ -118,17 +120,18 @@ void MainWindow::rebuildTabs()
         btn->setStyleSheet(active
             ? QStringLiteral("QPushButton { color:#fff; background:#0F766E; padding:2px 12px; border:none; }")
             : QStringLiteral("QPushButton { color:#94A3B8; background:transparent; padding:2px 12px; border:1px solid #334155; }"));
-        btn->setToolTip(QStringLiteral("%1  %2×%3%4")
-                            .arg(targets[i].deviceName)
-                            .arg(targets[i].geometry.width())
-                            .arg(targets[i].geometry.height())
-                            .arg(targets[i].likelyVirtual ? QStringLiteral(" · 虚拟") : QString()));
+        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz  缩放%5%")
+                            .arg(text)
+                            .arg(spec.width)
+                            .arg(spec.height)
+                            .arg(spec.hz)
+                            .arg(spec.scale));
         m_tabLay->insertWidget(m_tabLay->count() - 2, btn);
         connect(btn, &QPushButton::clicked, this, [this, i]() { selectTab(i); });
         m_tabs.push_back(btn);
     }
-    if (m_tabIndex >= targets.size())
-        m_tabIndex = qMax(0, targets.size() - 1);
+    if (m_tabIndex >= m_cfg.displays.size())
+        m_tabIndex = qMax(0, m_cfg.displays.size() - 1);
 }
 
 void MainWindow::selectTab(int index)
@@ -169,6 +172,7 @@ void MainWindow::onSaveSettings()
     c.save();
     m_cfg = c;
     m_settings->setProfileHint(m_cfg.profileName);
+    rebuildTabs();
     m_title->setStatusHint(QStringLiteral("已保存到 config.json"));
 }
 
@@ -196,16 +200,12 @@ void MainWindow::onSaveAsSettings()
     c.save(); // 同步为启动默认
     m_cfg = c;
     m_settings->loadFrom(m_cfg);
+    rebuildTabs();
     m_title->setStatusHint(QStringLiteral("已另存: %1").arg(c.profileName));
 }
 
-void MainWindow::onLoadSettings()
+void MainWindow::onLoadProfile(const QString &path)
 {
-    const QString path = QFileDialog::getOpenFileName(
-        m_settings,
-        QStringLiteral("加载配置"),
-        profilesDir(),
-        QStringLiteral("配置 (*.json)"));
     if (path.isEmpty())
         return;
     QString err;
@@ -215,11 +215,22 @@ void MainWindow::onLoadSettings()
         QMessageBox::warning(this, QStringLiteral("配置无效"), errs.join(QLatin1Char('\n')));
         return;
     }
-    c.save(); // 设为当前默认，下次启动沿用
+    c.save();
     m_cfg = c;
     m_settings->loadFrom(m_cfg);
     rebuildTabs();
     m_title->setStatusHint(QStringLiteral("已加载: %1").arg(m_cfg.profileName));
+}
+
+void MainWindow::onBrowseLoadSettings()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        m_settings,
+        QStringLiteral("加载配置"),
+        profilesDir(),
+        QStringLiteral("配置 (*.json)"));
+    if (!path.isEmpty())
+        onLoadProfile(path);
 }
 
 void MainWindow::runBg(const std::function<QString()> &work, const QString &title)
@@ -284,7 +295,8 @@ void MainWindow::onApply()
 
 void MainWindow::onClear()
 {
-    if (QMessageBox::question(this, QStringLiteral("清除"), QStringLiteral("禁用虚拟显示驱动设备？"))
+    if (QMessageBox::question(this, QStringLiteral("清除"),
+                              QStringLiteral("禁用虚拟显示驱动？\n清除后虚拟屏应从系统消失，桌面卡顿通常会缓解。"))
         != QMessageBox::Yes)
         return;
     if (!Elevate::isAdmin()) {
@@ -294,7 +306,10 @@ void MainWindow::onClear()
             close();
         return;
     }
-    runBg([this]() { return m_vdd->clearVirtualDisplays(); }, QStringLiteral("清除"));
+    runBg([this]() {
+        const QString msg = m_vdd->clearVirtualDisplays();
+        return msg;
+    }, QStringLiteral("清除"));
 }
 
 QPixmap MainWindow::grabMonitor(const MonitorInfo &mon) const
@@ -336,18 +351,29 @@ void MainWindow::refreshPreview()
     if (m_grabBusy || isMinimized() || !isVisible())
         return;
 
-    const auto targets = WinDisplay::previewTargets(true);
-    if (targets.isEmpty()) {
-        m_preview->setPlaceholder(QStringLiteral("没有可预览的监视器\n请先「应用」虚拟屏"));
+    if (m_cfg.displays.isEmpty()) {
+        m_preview->setPlaceholder(QStringLiteral("当前配置没有虚拟屏"));
         return;
     }
-    if (m_tabs.size() != targets.size())
+    if (m_tabs.size() != m_cfg.displays.size())
         rebuildTabs();
-    m_tabIndex = qBound(0, m_tabIndex, targets.size() - 1);
-    const MonitorInfo &mon = targets[m_tabIndex];
+    m_tabIndex = qBound(0, m_tabIndex, m_cfg.displays.size() - 1);
 
-    // 设备信息放标题栏 / Tab 提示，不占预览高度
-    m_title->setStatusHint(QStringLiteral("%1  %2×%3")
+    QVector<MonitorInfo> virtuals;
+    for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+        if (m.likelyVirtual)
+            virtuals.push_back(m);
+    }
+    const QString label = m_cfg.displays[m_tabIndex].label;
+    if (m_tabIndex >= virtuals.size()) {
+        m_preview->setPlaceholder(QStringLiteral("「%1」尚未上线\n请先点「应用」创建虚拟屏").arg(label));
+        m_title->setStatusHint(QStringLiteral("%1 · 未上线").arg(label));
+        return;
+    }
+    const MonitorInfo &mon = virtuals[m_tabIndex];
+
+    m_title->setStatusHint(QStringLiteral("%1  %2  %3×%4")
+                               .arg(label)
                                .arg(mon.deviceName)
                                .arg(mon.geometry.width())
                                .arg(mon.geometry.height()));

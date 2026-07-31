@@ -1,5 +1,7 @@
 #include "SettingsPanel.h"
 
+#include <QComboBox>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -20,7 +22,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     setStyleSheet(QStringLiteral(
         "QDialog { background:#FFFFFF; }"
         "QLabel { color:#0F1C2E; }"
-        "QLineEdit {"
+        "QLineEdit, QComboBox {"
         "  padding:4px; border:1px solid #D8E0EA; border-radius:2px;"
         "  background:#F7FAFC; color:#0F1C2E;"
         "}"
@@ -35,20 +37,23 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     title->setStyleSheet(QStringLiteral("font-weight:600; color:#0F766E; font-size:13px;"));
     lay->addWidget(title);
     lay->addWidget(new QLabel(
-        QStringLiteral("按项目增减虚拟屏；可另存/加载配置文件。布局测试建议缩放 100%。"),
+        QStringLiteral("按项目增减虚拟屏；用下拉切换已有配置。布局测试建议缩放 100%。"),
         this));
 
     m_profileHint = new QLabel(this);
     m_profileHint->setStyleSheet(QStringLiteral("color:#5B6B7C;"));
     lay->addWidget(m_profileHint);
 
-    auto *fileBtns = new QHBoxLayout();
-    auto *loadBtn = new QPushButton(QStringLiteral("加载配置…"), this);
+    auto *fileRow = new QHBoxLayout();
+    fileRow->addWidget(new QLabel(QStringLiteral("配置方案"), this));
+    m_profileCombo = new QComboBox(this);
+    m_profileCombo->setMinimumWidth(200);
+    fileRow->addWidget(m_profileCombo, 1);
     auto *saveAsBtn = new QPushButton(QStringLiteral("另存为…"), this);
-    fileBtns->addWidget(loadBtn);
-    fileBtns->addWidget(saveAsBtn);
-    fileBtns->addStretch();
-    lay->addLayout(fileBtns);
+    auto *browseBtn = new QPushButton(QStringLiteral("浏览…"), this);
+    fileRow->addWidget(saveAsBtn);
+    fileRow->addWidget(browseBtn);
+    lay->addLayout(fileRow);
 
     auto *scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
@@ -82,7 +87,9 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
     connect(addBtn, &QPushButton::clicked, this, &SettingsDialog::addDisplay);
     connect(delBtn, &QPushButton::clicked, this, &SettingsDialog::removeLastDisplay);
-    connect(loadBtn, &QPushButton::clicked, this, &SettingsDialog::loadRequested);
+    connect(m_profileCombo, QOverload<int>::of(&QComboBox::activated),
+            this, &SettingsDialog::onProfileComboChanged);
+    connect(browseBtn, &QPushButton::clicked, this, &SettingsDialog::browseLoadRequested);
     connect(saveAsBtn, &QPushButton::clicked, this, &SettingsDialog::saveAsRequested);
     connect(apply, &QPushButton::clicked, this, &SettingsDialog::applyRequested);
     connect(save, &QPushButton::clicked, this, &SettingsDialog::saveRequested);
@@ -95,6 +102,31 @@ void SettingsDialog::setProfileHint(const QString &name)
     m_profileHint->setText(name.isEmpty()
                                ? QStringLiteral("当前：未命名配置")
                                : QStringLiteral("当前配置：%1").arg(name));
+}
+
+void SettingsDialog::refreshProfileList(const QString &selectName)
+{
+    m_profileCombo->blockSignals(true);
+    m_profileCombo->clear();
+    m_profileCombo->addItem(QStringLiteral("（选择已有配置）"), QString());
+    const QStringList paths = listProfilePaths();
+    int sel = 0;
+    for (int i = 0; i < paths.size(); ++i) {
+        const QString name = QFileInfo(paths[i]).completeBaseName();
+        m_profileCombo->addItem(name, paths[i]);
+        if (!selectName.isEmpty() && name == selectName)
+            sel = i + 1;
+    }
+    m_profileCombo->setCurrentIndex(sel);
+    m_profileCombo->blockSignals(false);
+}
+
+void SettingsDialog::onProfileComboChanged(int index)
+{
+    const QString path = m_profileCombo->itemData(index).toString();
+    if (path.isEmpty())
+        return;
+    emit loadProfileRequested(path);
 }
 
 void SettingsDialog::rebuildRows(int count)
@@ -149,6 +181,7 @@ void SettingsDialog::loadFrom(const AppConfig &cfg)
     for (int i = 0; i < cfg.displays.size() && i < m_rowEdits.size(); ++i)
         fillRow(i, cfg.displays[i]);
     setProfileHint(cfg.profileName);
+    refreshProfileList(cfg.profileName);
 }
 
 AppConfig SettingsDialog::toConfig(const AppConfig &base) const
@@ -174,7 +207,6 @@ void SettingsDialog::addDisplay()
         return;
     }
     AppConfig cur = toConfig(AppConfig::defaults());
-    cur.profileName.clear();
     DisplaySpec s;
     s.label = QStringLiteral("虚拟屏%1").arg(cur.displays.size() + 1);
     s.width = 1920;
@@ -182,11 +214,11 @@ void SettingsDialog::addDisplay()
     s.scale = 100;
     s.hz = 60;
     cur.displays.push_back(s);
-    // 保留原提示名
-    const QString hint = m_profileHint->text();
+    const QString name = m_profileHint->text().startsWith(QStringLiteral("当前配置："))
+                             ? m_profileHint->text().mid(QStringLiteral("当前配置：").size())
+                             : QString();
+    cur.profileName = name;
     loadFrom(cur);
-    if (hint.startsWith(QStringLiteral("当前配置：")))
-        setProfileHint(hint.mid(QStringLiteral("当前配置：").size()));
 }
 
 void SettingsDialog::removeLastDisplay()
@@ -197,8 +229,9 @@ void SettingsDialog::removeLastDisplay()
     }
     AppConfig cur = toConfig(AppConfig::defaults());
     cur.displays.removeLast();
-    const QString hint = m_profileHint->text();
+    const QString name = m_profileHint->text().startsWith(QStringLiteral("当前配置："))
+                             ? m_profileHint->text().mid(QStringLiteral("当前配置：").size())
+                             : QString();
+    cur.profileName = name;
     loadFrom(cur);
-    if (hint.startsWith(QStringLiteral("当前配置：")))
-        setProfileHint(hint.mid(QStringLiteral("当前配置：").size()));
 }
