@@ -16,6 +16,7 @@ SOURCES += \
     src/main.cpp \
     src/MainWindow.cpp \
     src/TitleBar.cpp \
+    src/ChromeButton.cpp \
     src/PreviewPane.cpp \
     src/SettingsPanel.cpp \
     src/WinDisplay.cpp \
@@ -26,6 +27,7 @@ SOURCES += \
 HEADERS += \
     src/MainWindow.h \
     src/TitleBar.h \
+    src/ChromeButton.h \
     src/PreviewPane.h \
     src/SettingsPanel.h \
     src/WinDisplay.h \

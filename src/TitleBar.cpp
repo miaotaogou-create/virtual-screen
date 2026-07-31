@@ -1,5 +1,7 @@
 #include "TitleBar.h"
 
+#include "ChromeButton.h"
+
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -13,12 +15,10 @@ TitleBar::TitleBar(QWidget *parent)
         "TitleBar { background:#0F766E; }"
         "QLabel { color:#fff; background:transparent; }"
         "QPushButton { background:transparent; color:#ECFDF5; border:none; padding:0 10px; }"
-        "QPushButton:hover { background:#0D9488; }"
-        "QPushButton#closeBtn:hover { background:#B91C1C; }"
-        "QPushButton#winBtn { padding:0; font-size:12px; }"));
+        "QPushButton:hover { background:#0D9488; }"));
 
     auto *lay = new QHBoxLayout(this);
-    lay->setContentsMargins(10, 0, 2, 0);
+    lay->setContentsMargins(10, 0, 0, 0);
     lay->setSpacing(2);
 
     m_title = new QLabel(QStringLiteral("VirtualScreen"), this);
@@ -30,15 +30,9 @@ TitleBar::TitleBar(QWidget *parent)
     auto *clear = new QPushButton(QStringLiteral("清除"), this);
     auto *settings = new QPushButton(QStringLiteral("设置"), this);
 
-    auto *minBtn = new QPushButton(QStringLiteral("—"), this);
-    m_maxBtn = new QPushButton(QStringLiteral("□"), this);
-    auto *closeBtn = new QPushButton(QStringLiteral("×"), this);
-    minBtn->setObjectName(QStringLiteral("winBtn"));
-    m_maxBtn->setObjectName(QStringLiteral("winBtn"));
-    closeBtn->setObjectName(QStringLiteral("closeBtn"));
-    minBtn->setFixedSize(36, 28);
-    m_maxBtn->setFixedSize(36, 28);
-    closeBtn->setFixedSize(36, 28);
+    auto *minBtn = new ChromeButton(ChromeButton::Minimize, this);
+    m_maxBtn = new ChromeButton(ChromeButton::Maximize, this);
+    auto *closeBtn = new ChromeButton(ChromeButton::Close, this);
     minBtn->setToolTip(QStringLiteral("最小化"));
     m_maxBtn->setToolTip(QStringLiteral("最大化"));
     closeBtn->setToolTip(QStringLiteral("关闭"));
@@ -55,12 +49,12 @@ TitleBar::TitleBar(QWidget *parent)
     connect(apply, &QPushButton::clicked, this, &TitleBar::applyClicked);
     connect(clear, &QPushButton::clicked, this, &TitleBar::clearClicked);
     connect(settings, &QPushButton::clicked, this, &TitleBar::settingsClicked);
-    connect(closeBtn, &QPushButton::clicked, this, &TitleBar::closeClicked);
-    connect(minBtn, &QPushButton::clicked, this, [this]() {
+    connect(closeBtn, &QAbstractButton::clicked, this, &TitleBar::closeClicked);
+    connect(minBtn, &QAbstractButton::clicked, this, [this]() {
         if (window())
             window()->showMinimized();
     });
-    connect(m_maxBtn, &QPushButton::clicked, this, &TitleBar::toggleMaxRestore);
+    connect(m_maxBtn, &QAbstractButton::clicked, this, &TitleBar::toggleMaxRestore);
 }
 
 void TitleBar::toggleMaxRestore()
@@ -80,7 +74,7 @@ void TitleBar::syncMaxButton()
     if (!m_maxBtn || !window())
         return;
     const bool maxed = window()->isMaximized();
-    m_maxBtn->setText(maxed ? QStringLiteral("❐") : QStringLiteral("□"));
+    m_maxBtn->setKind(maxed ? ChromeButton::Restore : ChromeButton::Maximize);
     m_maxBtn->setToolTip(maxed ? QStringLiteral("还原") : QStringLiteral("最大化"));
 }
 
