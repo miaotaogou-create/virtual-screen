@@ -1,10 +1,17 @@
 {
-    "profile_name": "默认",
+    "profile_name": "双屏-1920x1200",
     "preview_interval_ms": 2000,
     "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml",
     "displays": [
         {
-            "label": "虚拟屏1",
+            "label": "显控",
+            "width": 1920,
+            "height": 1200,
+            "scale": 100,
+            "hz": 60
+        },
+        {
+            "label": "视频",
             "width": 1920,
             "height": 1200,
             "scale": 100,

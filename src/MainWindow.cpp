@@ -6,7 +6,10 @@
 #include "TitleBar.h"
 #include "VddService.h"
 
+#include <QDir>
 #include <QEvent>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -69,6 +72,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_previewToggle, &QPushButton::clicked, this, &MainWindow::togglePreview);
     connect(m_settings, &SettingsDialog::applyRequested, this, &MainWindow::onApply);
     connect(m_settings, &SettingsDialog::saveRequested, this, &MainWindow::onSaveSettings);
+    connect(m_settings, &SettingsDialog::saveAsRequested, this, &MainWindow::onSaveAsSettings);
+    connect(m_settings, &SettingsDialog::loadRequested, this, &MainWindow::onLoadSettings);
     connect(m_settings, &SettingsDialog::clearRequested, this, &MainWindow::onClear);
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
@@ -160,9 +165,61 @@ void MainWindow::onSaveSettings()
         QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
         return;
     }
+    c.profileName = m_cfg.profileName.isEmpty() ? QStringLiteral("当前") : m_cfg.profileName;
     c.save();
     m_cfg = c;
-    m_title->setStatusHint(QStringLiteral("配置已保存"));
+    m_settings->setProfileHint(m_cfg.profileName);
+    m_title->setStatusHint(QStringLiteral("已保存到 config.json"));
+}
+
+void MainWindow::onSaveAsSettings()
+{
+    AppConfig c = m_settings->toConfig(m_cfg);
+    const QStringList errs = c.validate();
+    if (!errs.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(
+        m_settings,
+        QStringLiteral("另存配置"),
+        QDir(profilesDir()).filePath(QStringLiteral("project.json")),
+        QStringLiteral("配置 (*.json)"));
+    if (path.isEmpty())
+        return;
+    c.profileName = QFileInfo(path).completeBaseName();
+    QString err;
+    if (!c.saveToFile(path, &err)) {
+        QMessageBox::warning(this, QStringLiteral("保存失败"), err);
+        return;
+    }
+    c.save(); // 同步为启动默认
+    m_cfg = c;
+    m_settings->loadFrom(m_cfg);
+    m_title->setStatusHint(QStringLiteral("已另存: %1").arg(c.profileName));
+}
+
+void MainWindow::onLoadSettings()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        m_settings,
+        QStringLiteral("加载配置"),
+        profilesDir(),
+        QStringLiteral("配置 (*.json)"));
+    if (path.isEmpty())
+        return;
+    QString err;
+    AppConfig c = AppConfig::loadFromFile(path, &err);
+    const QStringList errs = c.validate();
+    if (!errs.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("配置无效"), errs.join(QLatin1Char('\n')));
+        return;
+    }
+    c.save(); // 设为当前默认，下次启动沿用
+    m_cfg = c;
+    m_settings->loadFrom(m_cfg);
+    rebuildTabs();
+    m_title->setStatusHint(QStringLiteral("已加载: %1").arg(m_cfg.profileName));
 }
 
 void MainWindow::runBg(const std::function<QString()> &work, const QString &title)
@@ -212,6 +269,7 @@ void MainWindow::onApply()
     }
     c.save();
     m_cfg = c;
+    rebuildTabs();
 
     if (!Elevate::isAdmin()) {
         if (!Elevate::relaunchAsAdmin({QStringLiteral("--apply")}))

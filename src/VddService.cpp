@@ -184,9 +184,9 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
     }
 
     int nDev = 0;
-    if (virtuals.size() >= cfg.displays.size()) {
+    // 数量变了必须重启，否则多出来的屏会残留、少了则起不来
+    if (virtuals.size() == cfg.displays.size()) {
         emit progress(QStringLiteral("虚拟屏已在线，跳过驱动重启…"));
-        virtuals = virtuals.mid(0, cfg.displays.size());
     } else {
         emit progress(QStringLiteral("重启虚拟显示驱动…"));
         const QStringList ids = findVddInstanceIds();

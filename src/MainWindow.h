@@ -33,6 +33,8 @@ protected:
 private slots:
     void toggleSettings();
     void onSaveSettings();
+    void onSaveAsSettings();
+    void onLoadSettings();
     void togglePreview();
     void refreshPreview();
     void selectTab(int index);

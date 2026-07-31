@@ -1,0 +1,28 @@
+{
+    "profile_name": "三屏-1080p",
+    "preview_interval_ms": 2000,
+    "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml",
+    "displays": [
+        {
+            "label": "左屏",
+            "width": 1920,
+            "height": 1080,
+            "scale": 100,
+            "hz": 60
+        },
+        {
+            "label": "中屏",
+            "width": 1920,
+            "height": 1080,
+            "scale": 100,
+            "hz": 60
+        },
+        {
+            "label": "右屏",
+            "width": 1920,
+            "height": 1080,
+            "scale": 100,
+            "hz": 60
+        }
+    ]
+}
