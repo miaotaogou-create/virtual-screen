@@ -140,9 +140,11 @@ QStringList AppConfig::validate() const
     for (int i = 0; i < displays.size(); ++i) {
         const DisplaySpec &s = displays[i];
         if (s.width < 640 || s.height < 640)
-            errs << QStringLiteral("屏%1 分辨率过小").arg(i + 1);
-        if (s.scale < 100)
-            errs << QStringLiteral("屏%1 缩放建议 ≥ 100").arg(i + 1);
+            errs << QStringLiteral("屏%1 分辨率过小（≥ 640）").arg(i + 1);
+        if (s.width > 7680 || s.height > 4320)
+            errs << QStringLiteral("屏%1 分辨率过大").arg(i + 1);
+        if (s.hz < 30 || s.hz > 240)
+            errs << QStringLiteral("屏%1 刷新率应在 30–240 Hz").arg(i + 1);
     }
     return errs;
 }

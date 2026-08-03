@@ -42,8 +42,11 @@ private slots:
 
 private:
     void rebuildTabs();
+    void updateDriverUi();
     void runBg(const std::function<QString()> &work, const QString &title);
     QPixmap grabMonitor(const MonitorInfo &mon) const;
+    /** 按配置顺序匹配虚拟屏：先分辨率，再从左到右。 */
+    QVector<MonitorInfo> matchedVirtuals() const;
 
     AppConfig m_cfg;
     TitleBar *m_title = nullptr;

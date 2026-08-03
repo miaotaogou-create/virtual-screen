@@ -2,6 +2,7 @@
 
 #include "ChromeButton.h"
 
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -15,7 +16,11 @@ TitleBar::TitleBar(QWidget *parent)
         "TitleBar { background:#0F766E; }"
         "QLabel { color:#fff; background:transparent; }"
         "QPushButton { background:transparent; color:#ECFDF5; border:none; padding:0 10px; }"
-        "QPushButton:hover { background:#0D9488; }"));
+        "QPushButton:hover { background:#0D9488; }"
+        "QPushButton#primaryBtn {"
+        "  background:#115E59; color:#fff; font-weight:600; padding:0 12px;"
+        "}"
+        "QPushButton#primaryBtn:hover { background:#134E4A; }"));
 
     auto *lay = new QHBoxLayout(this);
     lay->setContentsMargins(10, 0, 0, 0);
@@ -27,8 +32,16 @@ TitleBar::TitleBar(QWidget *parent)
     m_hint->setStyleSheet(QStringLiteral("color:#CCFBF1; font-size:11px;"));
 
     auto *apply = new QPushButton(QStringLiteral("应用"), this);
+    apply->setObjectName(QStringLiteral("primaryBtn"));
+    apply->setToolTip(QStringLiteral("按当前配置创建/更新虚拟屏"));
     auto *clear = new QPushButton(QStringLiteral("清除"), this);
+    clear->setToolTip(QStringLiteral("禁用虚拟显示驱动"));
     auto *settings = new QPushButton(QStringLiteral("设置"), this);
+
+    auto *sep = new QFrame(this);
+    sep->setFrameShape(QFrame::VLine);
+    sep->setFixedWidth(1);
+    sep->setStyleSheet(QStringLiteral("background:#99F6E4; margin:6px 4px;"));
 
     auto *minBtn = new ChromeButton(ChromeButton::Minimize, this);
     m_maxBtn = new ChromeButton(ChromeButton::Maximize, this);
@@ -42,6 +55,7 @@ TitleBar::TitleBar(QWidget *parent)
     lay->addWidget(apply);
     lay->addWidget(clear);
     lay->addWidget(settings);
+    lay->addWidget(sep);
     lay->addWidget(minBtn);
     lay->addWidget(m_maxBtn);
     lay->addWidget(closeBtn);

@@ -39,8 +39,13 @@ void PreviewPane::ensureScaled()
         return;
     if (!m_scaled.isNull())
         return;
-    // Fast：预览够用；Smooth 每帧/每次 paint 会明显卡
-    m_scaled = m_source.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // 抓屏侧已按预览区缩过时，避免再 Smooth 一遍
+    const QSize fitted = m_source.size().scaled(size(), Qt::KeepAspectRatio);
+    if (m_source.size() == fitted) {
+        m_scaled = m_source;
+        return;
+    }
+    m_scaled = m_source.scaled(fitted, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 }
 
 void PreviewPane::paintEvent(QPaintEvent *)

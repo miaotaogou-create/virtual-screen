@@ -56,4 +56,6 @@ Qt 本身不是「一个 exe 走天下」；常用做法是 **windeployqt 收齐
 ## 说明
 
 - 依赖已安装的 [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver)
-- 布局测试建议缩放 **100%**
+- 未装驱动时：可用管理员运行 `scripts\install_vdd.ps1`，或从官网 Releases 安装
+- 普通启动**不强制**管理员；点「应用 / 清除」时再弹 UAC
+- **系统显示缩放（DPI）本工具暂不修改**，请在 Windows「显示设置」里调；配置里的分辨率/刷新率会写入驱动

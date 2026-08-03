@@ -10,38 +10,65 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSpinBox>
 #include <QVBoxLayout>
+
+static QSpinBox *makeSpin(QWidget *parent, int min, int max, int step, int value)
+{
+    auto *s = new QSpinBox(parent);
+    s->setRange(min, max);
+    s->setSingleStep(step);
+    s->setValue(value);
+    s->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
+    return s;
+}
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(QStringLiteral("设置"));
     setModal(true);
-    setMinimumSize(520, 420);
-    resize(560, 520);
+    setMinimumSize(540, 440);
+    resize(580, 540);
     setStyleSheet(QStringLiteral(
-        "QDialog { background:#FFFFFF; }"
-        "QLabel { color:#0F1C2E; }"
-        "QLineEdit, QComboBox {"
-        "  padding:4px; border:1px solid #D8E0EA; border-radius:2px;"
-        "  background:#F7FAFC; color:#0F1C2E;"
+        "QDialog { background:#0B1220; }"
+        "QLabel { color:#E2E8F0; }"
+        "QLineEdit, QComboBox, QSpinBox {"
+        "  padding:4px; border:1px solid #334155; border-radius:2px;"
+        "  background:#111827; color:#E2E8F0; selection-background-color:#0F766E;"
         "}"
-        "QPushButton { padding:6px 12px; background:#EEF2F6; border:1px solid #D8E0EA; }"
-        "QPushButton:hover { background:#CCFBF1; }"));
+        "QComboBox QAbstractItemView { background:#111827; color:#E2E8F0; selection-background-color:#0F766E; }"
+        "QPushButton {"
+        "  padding:6px 12px; background:#1E293B; border:1px solid #334155; color:#E2E8F0;"
+        "}"
+        "QPushButton:hover { background:#334155; }"
+        "QPushButton#primaryBtn {"
+        "  background:#0F766E; border:1px solid #0D9488; color:#fff; font-weight:600;"
+        "}"
+        "QPushButton#primaryBtn:hover { background:#0D9488; }"
+        "QScrollArea { background:transparent; border:none; }"
+        "QScrollBar:vertical { background:#0B1220; width:10px; }"
+        "QScrollBar::handle:vertical { background:#334155; border-radius:4px; }"));
 
     auto *lay = new QVBoxLayout(this);
     lay->setContentsMargins(16, 14, 16, 14);
     lay->setSpacing(10);
 
     auto *title = new QLabel(QStringLiteral("虚拟屏规格"), this);
-    title->setStyleSheet(QStringLiteral("font-weight:600; color:#0F766E; font-size:13px;"));
+    title->setStyleSheet(QStringLiteral("font-weight:600; color:#2DD4BF; font-size:13px;"));
     lay->addWidget(title);
     lay->addWidget(new QLabel(
-        QStringLiteral("按项目增减虚拟屏；用下拉切换已有配置。布局测试建议缩放 100%。"),
+        QStringLiteral("按项目增减虚拟屏；用下拉切换已有配置。系统显示缩放请在 Windows「显示设置」里改（本工具暂不改 DPI）。"),
         this));
 
+    m_driverHint = new QLabel(this);
+    m_driverHint->setWordWrap(true);
+    m_driverHint->setStyleSheet(QStringLiteral("color:#FCD34D;"));
+    m_driverHint->hide();
+    lay->addWidget(m_driverHint);
+
     m_profileHint = new QLabel(this);
-    m_profileHint->setStyleSheet(QStringLiteral("color:#5B6B7C;"));
+    m_profileHint->setStyleSheet(QStringLiteral("color:#94A3B8;"));
     lay->addWidget(m_profileHint);
 
     auto *fileRow = new QHBoxLayout();
@@ -59,6 +86,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     auto *scrollInner = new QWidget(scroll);
+    scrollInner->setStyleSheet(QStringLiteral("background:transparent;"));
     m_rows = new QVBoxLayout(scrollInner);
     m_rows->setContentsMargins(0, 0, 0, 0);
     m_rows->addStretch();
@@ -75,6 +103,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
     auto *btns = new QHBoxLayout();
     auto *apply = new QPushButton(QStringLiteral("应用配置"), this);
+    apply->setObjectName(QStringLiteral("primaryBtn"));
     auto *save = new QPushButton(QStringLiteral("保存为当前"), this);
     auto *clear = new QPushButton(QStringLiteral("清除虚拟屏"), this);
     auto *close = new QPushButton(QStringLiteral("关闭"), this);
@@ -95,6 +124,17 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     connect(save, &QPushButton::clicked, this, &SettingsDialog::saveRequested);
     connect(clear, &QPushButton::clicked, this, &SettingsDialog::clearRequested);
     connect(close, &QPushButton::clicked, this, &QDialog::reject);
+}
+
+void SettingsDialog::setDriverHint(const QString &text)
+{
+    if (text.isEmpty()) {
+        m_driverHint->hide();
+        m_driverHint->clear();
+        return;
+    }
+    m_driverHint->setText(text);
+    m_driverHint->show();
 }
 
 void SettingsDialog::setProfileHint(const QString &name)
@@ -140,24 +180,23 @@ void SettingsDialog::rebuildRows(int count)
     m_rowEdits.clear();
     for (int i = 0; i < count; ++i) {
         auto *box = new QWidget(this);
+        box->setStyleSheet(QStringLiteral("background:transparent;"));
         auto *fl = new QFormLayout(box);
         fl->setContentsMargins(0, 0, 0, 10);
         fl->setSpacing(4);
         Row r;
         r.label = new QLineEdit(box);
-        r.width = new QLineEdit(box);
-        r.height = new QLineEdit(box);
-        r.scale = new QLineEdit(box);
-        r.hz = new QLineEdit(box);
+        r.width = makeSpin(box, 640, 7680, 8, 1920);
+        r.height = makeSpin(box, 640, 4320, 8, 1080);
+        r.hz = makeSpin(box, 30, 240, 1, 60);
         fl->addRow(QStringLiteral("屏%1 名称").arg(i + 1), r.label);
         auto *res = new QHBoxLayout();
         res->addWidget(r.width);
         res->addWidget(new QLabel(QStringLiteral("×"), box));
         res->addWidget(r.height);
-        res->addWidget(new QLabel(QStringLiteral("缩放%"), box));
-        res->addWidget(r.scale);
         res->addWidget(new QLabel(QStringLiteral("Hz"), box));
         res->addWidget(r.hz);
+        res->addStretch();
         fl->addRow(QStringLiteral("分辨率"), res);
         m_rows->insertWidget(m_rows->count() - 1, box);
         m_rowEdits.push_back(r);
@@ -169,10 +208,9 @@ void SettingsDialog::fillRow(int index, const DisplaySpec &s)
     if (index < 0 || index >= m_rowEdits.size())
         return;
     m_rowEdits[index].label->setText(s.label);
-    m_rowEdits[index].width->setText(QString::number(s.width));
-    m_rowEdits[index].height->setText(QString::number(s.height));
-    m_rowEdits[index].scale->setText(QString::number(s.scale));
-    m_rowEdits[index].hz->setText(QString::number(s.hz));
+    m_rowEdits[index].width->setValue(s.width);
+    m_rowEdits[index].height->setValue(s.height);
+    m_rowEdits[index].hz->setValue(s.hz);
 }
 
 void SettingsDialog::loadFrom(const AppConfig &cfg)
@@ -191,10 +229,10 @@ AppConfig SettingsDialog::toConfig(const AppConfig &base) const
     for (const Row &r : m_rowEdits) {
         DisplaySpec s;
         s.label = r.label->text().trimmed().isEmpty() ? QStringLiteral("屏") : r.label->text().trimmed();
-        s.width = r.width->text().toInt();
-        s.height = r.height->text().toInt();
-        s.scale = r.scale->text().toInt();
-        s.hz = r.hz->text().toInt();
+        s.width = r.width->value();
+        s.height = r.height->value();
+        s.scale = 100; // 本工具暂不改系统 DPI，配置里固定 100
+        s.hz = r.hz->value();
         c.displays.push_back(s);
     }
     return c;

@@ -107,14 +107,14 @@ QStringList findVddInstanceIds()
         };
         auto flush = [&]() {
             const QString blob = (curDesc + QLatin1Char(' ') + curId).toLower();
+            // 只认描述里的 VDD 特征，不用裸 ROOT\DISPLAY 以免误伤其它设备
             const bool byName = blob.contains(QStringLiteral("virtual display"))
                 || blob.contains(QStringLiteral("mttvdd"))
                 || blob.contains(QStringLiteral("iddsample"))
                 || blob.contains(QStringLiteral("indirect display"))
                 || blob.contains(QStringLiteral("vdd by"))
                 || blob.contains(QStringLiteral("mikethetech"));
-            const bool byRoot = curId.toUpper().startsWith(QStringLiteral("ROOT\\DISPLAY\\"));
-            if ((byName || byRoot) && !curId.isEmpty())
+            if (byName && !curId.isEmpty())
                 ids << curId;
             curId.clear();
             curDesc.clear();
@@ -155,12 +155,6 @@ QStringList findVddInstanceIds()
             if (line.contains(QLatin1Char('\\')))
                 ids << line;
         }
-    }
-
-    // 3) 最后兜底：VDD 常见实例号
-    if (ids.isEmpty()) {
-        for (int i = 0; i < 4; ++i)
-            ids << QStringLiteral("ROOT\\DISPLAY\\%1").arg(i, 4, 10, QChar(QLatin1Char('0')));
     }
 
     ids.removeDuplicates();
@@ -208,8 +202,10 @@ bool VddService::driverReady() const
 QString VddService::installDriverHint() const
 {
     return QStringLiteral(
-        "请先安装 Virtual Display Driver（官方包或本工具旧版「安装驱动」）。"
-        "安装后目录通常为 C:\\VirtualDisplayDriver。");
+        "未检测到 Virtual Display Driver。请先安装驱动：\n"
+        "1) 官方：https://github.com/VirtualDrivers/Virtual-Display-Driver/releases\n"
+        "2) 或管理员运行仓库 scripts\\install_vdd.ps1\n"
+        "装好后通常出现 C:\\VirtualDisplayDriver，再点「应用」。");
 }
 
 QString VddService::clearVirtualDisplays()

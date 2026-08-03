@@ -1,4 +1,3 @@
-#include "Elevate.h"
 #include "MainWindow.h"
 
 #include <QApplication>
@@ -21,11 +20,7 @@ int main(int argc, char *argv[])
     f.setPointSize(9);
     app.setFont(f);
 
-    // 启动提权一次，减少后续操作反复弹 UAC
-    if (Elevate::ensureAdminAtStart(argc, argv)) {
-        return 0; // 已拉起管理员实例
-    }
-
+    // 普通启动不提权；仅「应用 / 清除」时再弹 UAC
     MainWindow w;
     w.show();
 

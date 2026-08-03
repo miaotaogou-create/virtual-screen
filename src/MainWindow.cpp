@@ -38,7 +38,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_title = new TitleBar(this);
     m_title->setAdminHint(Elevate::isAdmin() ? QStringLiteral("管理员") : QStringLiteral("普通权限"));
-    m_title->setStatusHint(m_vdd->driverReady() ? QStringLiteral("驱动就绪") : QStringLiteral("未检测到驱动"));
     root->addWidget(m_title);
 
     // 薄 Tab 行
@@ -60,10 +59,15 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_preview = new PreviewPane(this);
     root->addWidget(m_preview, 1);
-    m_preview->setPlaceholder(QStringLiteral("预览默认关闭（更流畅）\n需要看画面时点右上角「预览:关」打开"));
 
     m_settings = new SettingsDialog(this);
     m_settings->loadFrom(m_cfg);
+    if (m_vdd->driverReady()) {
+        m_title->setStatusHint(QStringLiteral("驱动就绪"));
+        m_preview->setPlaceholder(QStringLiteral("预览默认关闭（更流畅）\n需要看画面时点右上角「预览:开」打开"));
+    } else {
+        updateDriverUi();
+    }
 
     connect(m_title, &TitleBar::applyClicked, this, &MainWindow::onApply);
     connect(m_title, &TitleBar::clearClicked, this, &MainWindow::onClear);
@@ -99,6 +103,19 @@ void MainWindow::resizeEvent(QResizeEvent *e)
     QWidget::resizeEvent(e);
 }
 
+void MainWindow::updateDriverUi()
+{
+    if (m_vdd->driverReady()) {
+        m_settings->setDriverHint(QString());
+        return;
+    }
+    const QString hint = m_vdd->installDriverHint();
+    m_title->setStatusHint(QStringLiteral("未检测到驱动"));
+    m_settings->setDriverHint(hint);
+    if (!m_previewOn)
+        m_preview->setPlaceholder(hint);
+}
+
 void MainWindow::rebuildTabs()
 {
     for (QPushButton *b : m_tabs) {
@@ -120,12 +137,11 @@ void MainWindow::rebuildTabs()
         btn->setStyleSheet(active
             ? QStringLiteral("QPushButton { color:#fff; background:#0F766E; padding:2px 12px; border:none; }")
             : QStringLiteral("QPushButton { color:#94A3B8; background:transparent; padding:2px 12px; border:1px solid #334155; }"));
-        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz  缩放%5%")
+        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz")
                             .arg(text)
                             .arg(spec.width)
                             .arg(spec.height)
-                            .arg(spec.hz)
-                            .arg(spec.scale));
+                            .arg(spec.hz));
         m_tabLay->insertWidget(m_tabLay->count() - 2, btn);
         connect(btn, &QPushButton::clicked, this, [this, i]() { selectTab(i); });
         m_tabs.push_back(btn);
@@ -151,11 +167,12 @@ void MainWindow::togglePreview()
     if (m_previewOn)
         refreshPreview();
     else
-        m_preview->setPlaceholder(QStringLiteral("预览已关闭（更省资源）\n点右上角「预览:关」打开"));
+        m_preview->setPlaceholder(QStringLiteral("预览已关闭（更省资源）\n点右上角「预览:开」打开"));
 }
 
 void MainWindow::toggleSettings()
 {
+    updateDriverUi();
     m_settings->loadFrom(m_cfg);
     m_settings->exec();
 }
@@ -257,12 +274,15 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
         }
         QMetaObject::invokeMethod(this, [this, msg, ok, title]() {
             m_busy = false;
-            m_title->setStatusHint(msg);
+            m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0));
             rebuildTabs();
-            if (ok)
-                QMessageBox::information(this, title, msg);
-            else
+            if (m_vdd->driverReady())
+                m_settings->setDriverHint(QString());
+            // 成功只走标题栏提示；失败/警告再弹框
+            if (!ok)
                 QMessageBox::critical(this, title, msg);
+            else if (msg.contains(QStringLiteral("警告")))
+                QMessageBox::warning(this, title, msg);
             refreshPreview();
         }, Qt::QueuedConnection);
     });
@@ -276,6 +296,10 @@ void MainWindow::onApply()
     const QStringList errs = c.validate();
     if (!errs.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
+        return;
+    }
+    if (!m_vdd->driverReady()) {
+        QMessageBox::warning(this, QStringLiteral("缺少驱动"), m_vdd->installDriverHint());
         return;
     }
     c.save();
@@ -335,13 +359,50 @@ QPixmap MainWindow::grabMonitor(const MonitorInfo &mon) const
     if (pm.isNull())
         return {};
 
-    // 抓完立刻缩到预览区大小，避免整屏位图常驻 + paint 再平滑缩放
+    // 只在抓屏侧 Smooth 缩一次；PreviewPane 若尺寸已对齐则不再缩放
     const QSize target = m_preview ? m_preview->size() : QSize(960, 600);
     if (target.width() > 1 && target.height() > 1
         && (pm.width() > target.width() || pm.height() > target.height())) {
         pm = pm.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     return pm;
+}
+
+QVector<MonitorInfo> MainWindow::matchedVirtuals() const
+{
+    QVector<MonitorInfo> pool;
+    for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+        if (m.likelyVirtual)
+            pool.push_back(m);
+    }
+    // listMonitors 已按 x 排序；再按配置分辨率贪心匹配，降低错屏概率
+    QVector<MonitorInfo> out(m_cfg.displays.size());
+    QVector<bool> used(pool.size(), false);
+    for (int i = 0; i < m_cfg.displays.size(); ++i) {
+        const DisplaySpec &spec = m_cfg.displays[i];
+        int best = -1;
+        for (int j = 0; j < pool.size(); ++j) {
+            if (used[j])
+                continue;
+            if (pool[j].geometry.width() == spec.width && pool[j].geometry.height() == spec.height) {
+                best = j;
+                break;
+            }
+        }
+        if (best < 0) {
+            for (int j = 0; j < pool.size(); ++j) {
+                if (!used[j]) {
+                    best = j;
+                    break;
+                }
+            }
+        }
+        if (best >= 0) {
+            used[best] = true;
+            out[i] = pool[best];
+        }
+    }
+    return out;
 }
 
 void MainWindow::refreshPreview()
@@ -359,13 +420,9 @@ void MainWindow::refreshPreview()
         rebuildTabs();
     m_tabIndex = qBound(0, m_tabIndex, m_cfg.displays.size() - 1);
 
-    QVector<MonitorInfo> virtuals;
-    for (const MonitorInfo &m : WinDisplay::listMonitors()) {
-        if (m.likelyVirtual)
-            virtuals.push_back(m);
-    }
+    const QVector<MonitorInfo> virtuals = matchedVirtuals();
     const QString label = m_cfg.displays[m_tabIndex].label;
-    if (m_tabIndex >= virtuals.size()) {
+    if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
         m_preview->setPlaceholder(QStringLiteral("「%1」尚未上线\n请先点「应用」创建虚拟屏").arg(label));
         m_title->setStatusHint(QStringLiteral("%1 · 未上线").arg(label));
         return;

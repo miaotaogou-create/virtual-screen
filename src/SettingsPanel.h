@@ -6,9 +6,11 @@
 #include <QVector>
 
 class QLineEdit;
+class QSpinBox;
 class QLabel;
 class QVBoxLayout;
 class QComboBox;
+class QPushButton;
 
 /** 设置对话框：可增减虚拟屏，下拉切换/另存项目配置。 */
 class SettingsDialog : public QDialog
@@ -21,6 +23,7 @@ public:
     AppConfig toConfig(const AppConfig &base) const;
     void setProfileHint(const QString &name);
     void refreshProfileList(const QString &selectName = QString());
+    void setDriverHint(const QString &text);
 
 signals:
     void applyRequested();
@@ -38,12 +41,12 @@ private slots:
 private:
     struct Row {
         QLineEdit *label = nullptr;
-        QLineEdit *width = nullptr;
-        QLineEdit *height = nullptr;
-        QLineEdit *scale = nullptr;
-        QLineEdit *hz = nullptr;
+        QSpinBox *width = nullptr;
+        QSpinBox *height = nullptr;
+        QSpinBox *hz = nullptr;
     };
     QLabel *m_profileHint = nullptr;
+    QLabel *m_driverHint = nullptr;
     QComboBox *m_profileCombo = nullptr;
     QVBoxLayout *m_rows = nullptr;
     QVector<Row> m_rowEdits;

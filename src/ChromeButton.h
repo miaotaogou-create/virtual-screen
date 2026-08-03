@@ -2,6 +2,8 @@
 
 #include <QAbstractButton>
 
+class QMouseEvent;
+
 /** 标题栏窗控：自绘图标，线宽/占位统一。 */
 class ChromeButton : public QAbstractButton
 {
@@ -17,8 +19,11 @@ protected:
     void paintEvent(QPaintEvent *e) override;
     void enterEvent(QEvent *e) override;
     void leaveEvent(QEvent *e) override;
+    void mousePressEvent(QMouseEvent *e) override;
+    void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
     Kind m_kind;
     bool m_hover = false;
+    bool m_pressed = false;
 };
