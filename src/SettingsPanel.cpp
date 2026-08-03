@@ -205,16 +205,19 @@ void SettingsDialog::rebuildRows(int count)
         res->addStretch();
         fl->addRow(QStringLiteral("分辨率"), res);
 
-        auto *dpiHz = new QHBoxLayout();
-        dpiHz->setSpacing(6);
-        dpiHz->addWidget(r.scale);
-        dpiHz->addWidget(new QLabel(QStringLiteral("%"), box));
-        dpiHz->addSpacing(16);
-        dpiHz->addWidget(new QLabel(QStringLiteral("刷新率"), box));
-        dpiHz->addWidget(r.hz);
-        dpiHz->addWidget(new QLabel(QStringLiteral("Hz"), box));
-        dpiHz->addStretch();
-        fl->addRow(QStringLiteral("缩放"), dpiHz);
+        auto *scaleRow = new QHBoxLayout();
+        scaleRow->setSpacing(6);
+        scaleRow->addWidget(r.scale);
+        scaleRow->addWidget(new QLabel(QStringLiteral("%"), box));
+        scaleRow->addStretch();
+        fl->addRow(QStringLiteral("缩放"), scaleRow);
+
+        auto *hzRow = new QHBoxLayout();
+        hzRow->setSpacing(6);
+        hzRow->addWidget(r.hz);
+        hzRow->addWidget(new QLabel(QStringLiteral("Hz"), box));
+        hzRow->addStretch();
+        fl->addRow(QStringLiteral("刷新率"), hzRow);
         m_rows->insertWidget(m_rows->count() - 1, box);
         m_rowEdits.push_back(r);
     }
