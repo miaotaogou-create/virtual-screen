@@ -346,7 +346,45 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
     }
     WinDisplay::applyDisplayChanges();
 
+    emit progress(QStringLiteral("设置显示缩放…"));
+    QThread::msleep(400); // 等模式落定后再改 DPI，成功率更高
+    int dpiOk = 0;
+    int dpiFail = 0;
+    // 重新枚举，按当前几何匹配刚设好的虚拟屏
+    QVector<MonitorInfo> after;
+    for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+        if (m.likelyVirtual)
+            after.push_back(m);
+    }
+    for (int i = 0; i < cfg.displays.size(); ++i) {
+        const DisplaySpec &spec = cfg.displays[i];
+        QString device = (i < virtuals.size()) ? virtuals[i].deviceName : QString();
+        for (const MonitorInfo &m : after) {
+            if (m.geometry.width() == spec.width && m.geometry.height() == spec.height
+                && m.geometry.x() >= primary.geometry.right() - 8) {
+                device = m.deviceName;
+                break;
+            }
+        }
+        if (device.isEmpty()) {
+            ++dpiFail;
+            continue;
+        }
+        if (WinDisplay::setDpiScale(device, spec.scale))
+            ++dpiOk;
+        else
+            ++dpiFail;
+    }
+
+    QString msg;
     if (nDev > 0)
-        return QStringLiteral("已应用 %1 块虚拟屏（驱动设备 %2）。").arg(cfg.displays.size()).arg(nDev);
-    return QStringLiteral("已更新 %1 块虚拟屏分辨率/位置。").arg(cfg.displays.size());
+        msg = QStringLiteral("已应用 %1 块虚拟屏（驱动设备 %2）").arg(cfg.displays.size()).arg(nDev);
+    else
+        msg = QStringLiteral("已更新 %1 块虚拟屏分辨率/位置").arg(cfg.displays.size());
+    if (dpiOk > 0)
+        msg += QStringLiteral("，缩放成功 %1").arg(dpiOk);
+    if (dpiFail > 0)
+        msg += QStringLiteral("，缩放失败 %1（可到系统显示设置手动调）").arg(dpiFail);
+    msg += QStringLiteral("。");
+    return msg;
 }

@@ -58,7 +58,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     title->setStyleSheet(QStringLiteral("font-weight:600; color:#2DD4BF; font-size:13px;"));
     lay->addWidget(title);
     lay->addWidget(new QLabel(
-        QStringLiteral("按项目增减虚拟屏；用下拉切换已有配置。系统显示缩放请在 Windows「显示设置」里改（本工具暂不改 DPI）。"),
+        QStringLiteral("按项目增减虚拟屏；用下拉切换已有配置。缩放% 会写入该屏的系统 DPI（100/125/150…）。"),
         this));
 
     m_driverHint = new QLabel(this);
@@ -188,15 +188,17 @@ void SettingsDialog::rebuildRows(int count)
         r.label = new QLineEdit(box);
         r.width = makeSpin(box, 640, 7680, 8, 1920);
         r.height = makeSpin(box, 640, 4320, 8, 1080);
+        r.scale = makeSpin(box, 100, 500, 25, 100);
         r.hz = makeSpin(box, 30, 240, 1, 60);
         fl->addRow(QStringLiteral("屏%1 名称").arg(i + 1), r.label);
         auto *res = new QHBoxLayout();
         res->addWidget(r.width);
         res->addWidget(new QLabel(QStringLiteral("×"), box));
         res->addWidget(r.height);
+        res->addWidget(new QLabel(QStringLiteral("缩放%"), box));
+        res->addWidget(r.scale);
         res->addWidget(new QLabel(QStringLiteral("Hz"), box));
         res->addWidget(r.hz);
-        res->addStretch();
         fl->addRow(QStringLiteral("分辨率"), res);
         m_rows->insertWidget(m_rows->count() - 1, box);
         m_rowEdits.push_back(r);
@@ -210,6 +212,7 @@ void SettingsDialog::fillRow(int index, const DisplaySpec &s)
     m_rowEdits[index].label->setText(s.label);
     m_rowEdits[index].width->setValue(s.width);
     m_rowEdits[index].height->setValue(s.height);
+    m_rowEdits[index].scale->setValue(s.scale);
     m_rowEdits[index].hz->setValue(s.hz);
 }
 
@@ -231,7 +234,7 @@ AppConfig SettingsDialog::toConfig(const AppConfig &base) const
         s.label = r.label->text().trimmed().isEmpty() ? QStringLiteral("屏") : r.label->text().trimmed();
         s.width = r.width->value();
         s.height = r.height->value();
-        s.scale = 100; // 本工具暂不改系统 DPI，配置里固定 100
+        s.scale = r.scale->value();
         s.hz = r.hz->value();
         c.displays.push_back(s);
     }

@@ -145,6 +145,8 @@ QStringList AppConfig::validate() const
             errs << QStringLiteral("屏%1 分辨率过大").arg(i + 1);
         if (s.hz < 30 || s.hz > 240)
             errs << QStringLiteral("屏%1 刷新率应在 30–240 Hz").arg(i + 1);
+        if (s.scale < 100 || s.scale > 500)
+            errs << QStringLiteral("屏%1 缩放应在 100–500%").arg(i + 1);
     }
     return errs;
 }

@@ -2,6 +2,9 @@
 
 #include <QHash>
 #include <algorithm>
+#include <cstring>
+#include <vector>
+#include <string>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -65,6 +68,73 @@ BOOL CALLBACK enumMonProc(HMONITOR hmon, HDC, LPRECT, LPARAM data)
     m.primary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
     out->push_back(m);
     return TRUE;
+}
+
+// 系统设置里观察到的缩放档位；相对「推荐值」步进
+static const UINT32 kDpiSteps[] = {
+    100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500
+};
+
+enum {
+    DISPLAYCONFIG_DEVICE_INFO_GET_DPI_SCALE = -3,
+    DISPLAYCONFIG_DEVICE_INFO_SET_DPI_SCALE = -4
+};
+
+struct SourceDpiScaleGet {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    INT32 minScaleRel;
+    INT32 curScaleRel;
+    INT32 maxScaleRel;
+};
+
+struct SourceDpiScaleSet {
+    DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+    INT32 scaleRel;
+};
+
+UINT32 nearestDpiStep(int percent)
+{
+    UINT32 best = kDpiSteps[0];
+    int bestDiff = qAbs(int(best) - percent);
+    for (UINT32 v : kDpiSteps) {
+        const int d = qAbs(int(v) - percent);
+        if (d < bestDiff) {
+            best = v;
+            bestDiff = d;
+        }
+    }
+    return best;
+}
+
+bool findSourceIds(const QString &deviceName, LUID *adapterId, UINT32 *sourceId)
+{
+    UINT32 pathCount = 0;
+    UINT32 modeCount = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS)
+        return false;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(),
+                           &modeCount, modes.data(), nullptr) != ERROR_SUCCESS)
+        return false;
+    paths.resize(pathCount);
+
+    for (const DISPLAYCONFIG_PATH_INFO &path : paths) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME srcName{};
+        srcName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        srcName.header.size = sizeof(srcName);
+        srcName.header.adapterId = path.sourceInfo.adapterId;
+        srcName.header.id = path.sourceInfo.id;
+        if (DisplayConfigGetDeviceInfo(&srcName.header) != ERROR_SUCCESS)
+            continue;
+        const QString gdi = QString::fromWCharArray(srcName.viewGdiDeviceName);
+        if (gdi.compare(deviceName, Qt::CaseInsensitive) == 0) {
+            *adapterId = path.sourceInfo.adapterId;
+            *sourceId = path.sourceInfo.id;
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -135,10 +205,66 @@ bool applyDisplayChanges()
     return ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr) == DISP_CHANGE_SUCCESSFUL;
 }
 
-bool setDpiScale(const QString &, int)
+bool setDpiScale(const QString &deviceName, int scalePercent)
 {
-    // ponytail: DPI 档位因系统而异；分辨率已够用。需要时再接到 DisplayConfig。
-    return false;
+    // ponytail: DisplayConfig *-3/-4 未公开，但 Win10/11 设置页同路；档位不在表内就近取
+    if (deviceName.isEmpty() || scalePercent < 100)
+        return false;
+
+    LUID adapterId{};
+    UINT32 sourceId = 0;
+    if (!findSourceIds(deviceName, &adapterId, &sourceId))
+        return false;
+
+    SourceDpiScaleGet getPkt{};
+    getPkt.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(DISPLAYCONFIG_DEVICE_INFO_GET_DPI_SCALE);
+    getPkt.header.size = sizeof(getPkt);
+    getPkt.header.adapterId = adapterId;
+    getPkt.header.id = sourceId;
+    if (DisplayConfigGetDeviceInfo(&getPkt.header) != ERROR_SUCCESS)
+        return false;
+
+    if (getPkt.curScaleRel < getPkt.minScaleRel)
+        getPkt.curScaleRel = getPkt.minScaleRel;
+    if (getPkt.curScaleRel > getPkt.maxScaleRel)
+        getPkt.curScaleRel = getPkt.maxScaleRel;
+
+    const int minAbs = qAbs(int(getPkt.minScaleRel));
+    const int stepCount = int(sizeof(kDpiSteps) / sizeof(kDpiSteps[0]));
+    if (minAbs + getPkt.maxScaleRel + 1 > stepCount)
+        return false;
+
+    const UINT32 recommended = kDpiSteps[minAbs];
+    const UINT32 minimum = kDpiSteps[minAbs + getPkt.minScaleRel];
+    const UINT32 maximum = kDpiSteps[minAbs + getPkt.maxScaleRel];
+    UINT32 target = nearestDpiStep(scalePercent);
+    if (target < minimum)
+        target = minimum;
+    if (target > maximum)
+        target = maximum;
+
+    int idxTarget = -1;
+    int idxReco = -1;
+    for (int i = 0; i < stepCount; ++i) {
+        if (kDpiSteps[i] == target)
+            idxTarget = i;
+        if (kDpiSteps[i] == recommended)
+            idxReco = i;
+    }
+    if (idxTarget < 0 || idxReco < 0)
+        return false;
+
+    const INT32 rel = idxTarget - idxReco;
+    if (rel == getPkt.curScaleRel)
+        return true;
+
+    SourceDpiScaleSet setPkt{};
+    setPkt.header.type = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(DISPLAYCONFIG_DEVICE_INFO_SET_DPI_SCALE);
+    setPkt.header.size = sizeof(setPkt);
+    setPkt.header.adapterId = adapterId;
+    setPkt.header.id = sourceId;
+    setPkt.scaleRel = rel;
+    return DisplayConfigSetDeviceInfo(&setPkt.header) == ERROR_SUCCESS;
 }
 
 } // namespace WinDisplay

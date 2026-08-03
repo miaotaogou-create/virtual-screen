@@ -43,6 +43,7 @@ private:
         QLineEdit *label = nullptr;
         QSpinBox *width = nullptr;
         QSpinBox *height = nullptr;
+        QSpinBox *scale = nullptr;
         QSpinBox *hz = nullptr;
     };
     QLabel *m_profileHint = nullptr;

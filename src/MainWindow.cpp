@@ -137,11 +137,12 @@ void MainWindow::rebuildTabs()
         btn->setStyleSheet(active
             ? QStringLiteral("QPushButton { color:#fff; background:#0F766E; padding:2px 12px; border:none; }")
             : QStringLiteral("QPushButton { color:#94A3B8; background:transparent; padding:2px 12px; border:1px solid #334155; }"));
-        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz")
+        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz  缩放%5%")
                             .arg(text)
                             .arg(spec.width)
                             .arg(spec.height)
-                            .arg(spec.hz));
+                            .arg(spec.hz)
+                            .arg(spec.scale));
         m_tabLay->insertWidget(m_tabLay->count() - 2, btn);
         connect(btn, &QPushButton::clicked, this, [this, i]() { selectTab(i); });
         m_tabs.push_back(btn);
