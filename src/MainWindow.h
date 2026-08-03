@@ -29,6 +29,7 @@ public slots:
 protected:
     void changeEvent(QEvent *e) override;
     void resizeEvent(QResizeEvent *e) override;
+    bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
 
 private slots:
     void toggleSettings();
@@ -44,9 +45,9 @@ private:
     void rebuildTabs();
     void updateDriverUi();
     void runBg(const std::function<QString()> &work, const QString &title);
-    QPixmap grabMonitor(const MonitorInfo &mon) const;
     /** 按配置顺序匹配虚拟屏：先分辨率，再从左到右。 */
     QVector<MonitorInfo> matchedVirtuals() const;
+    int hitTestBorder(const QPoint &pos) const;
 
     AppConfig m_cfg;
     TitleBar *m_title = nullptr;

@@ -1,6 +1,7 @@
 #include "WinDisplay.h"
 
 #include <QHash>
+#include <QImage>
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -265,6 +266,48 @@ bool setDpiScale(const QString &deviceName, int scalePercent)
     setPkt.header.id = sourceId;
     setPkt.scaleRel = rel;
     return DisplayConfigSetDeviceInfo(&setPkt.header) == ERROR_SUCCESS;
+}
+
+QImage captureDesktopRect(const QRect &geo)
+{
+    if (geo.width() < 1 || geo.height() < 1)
+        return {};
+
+    const int w = geo.width();
+    const int h = geo.height();
+    HDC screen = GetDC(nullptr);
+    if (!screen)
+        return {};
+    HDC mem = CreateCompatibleDC(screen);
+    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
+    if (!mem || !bmp) {
+        if (bmp)
+            DeleteObject(bmp);
+        if (mem)
+            DeleteDC(mem);
+        ReleaseDC(nullptr, screen);
+        return {};
+    }
+    HGDIOBJ old = SelectObject(mem, bmp);
+    BitBlt(mem, 0, 0, w, h, screen, geo.x(), geo.y(), SRCCOPY | CAPTUREBLT);
+    SelectObject(mem, old);
+
+    BITMAPINFOHEADER bi{};
+    bi.biSize = sizeof(bi);
+    bi.biWidth = w;
+    bi.biHeight = -h; // top-down
+    bi.biPlanes = 1;
+    bi.biBitCount = 32;
+    bi.biCompression = BI_RGB;
+
+    QImage img(w, h, QImage::Format_ARGB32);
+    GetDIBits(screen, bmp, 0, UINT(h), img.bits(), reinterpret_cast<BITMAPINFO *>(&bi), DIB_RGB_COLORS);
+
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    // GDI 是 BGRA；Qt ARGB32 在小端同布局，可直接用
+    return img;
 }
 
 } // namespace WinDisplay

@@ -12,14 +12,22 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QScreen>
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#ifndef GET_X_LPARAM
+#define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
+#define GET_Y_LPARAM(lp) ((int)(short)HIWORD(lp))
+#endif
 
 MainWindow::MainWindow(QWidget *parent)
     : QWidget(parent)
@@ -101,6 +109,56 @@ void MainWindow::changeEvent(QEvent *e)
 void MainWindow::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
+}
+
+int MainWindow::hitTestBorder(const QPoint &pos) const
+{
+    const int b = 6;
+    const int w = width();
+    const int h = height();
+    const bool left = pos.x() <= b;
+    const bool right = pos.x() >= w - b;
+    const bool top = pos.y() <= b;
+    const bool bottom = pos.y() >= h - b;
+    if (top && left)
+        return HTTOPLEFT;
+    if (top && right)
+        return HTTOPRIGHT;
+    if (bottom && left)
+        return HTBOTTOMLEFT;
+    if (bottom && right)
+        return HTBOTTOMRIGHT;
+    if (left)
+        return HTLEFT;
+    if (right)
+        return HTRIGHT;
+    if (top)
+        return HTTOP;
+    if (bottom)
+        return HTBOTTOM;
+    return HTCLIENT;
+}
+
+bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *result)
+{
+#if defined(Q_OS_WIN)
+    if (eventType == "windows_generic_MSG" || eventType == "windows_dispatcher_MSG") {
+        const MSG *msg = static_cast<MSG *>(message);
+        if (msg->message == WM_NCHITTEST && !isMaximized()) {
+            const QPoint local = mapFromGlobal(QPoint(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)));
+            const int hit = hitTestBorder(local);
+            if (hit != HTCLIENT) {
+                *result = hit;
+                return true;
+            }
+        }
+    }
+#else
+    Q_UNUSED(eventType);
+    Q_UNUSED(message);
+    Q_UNUSED(result);
+#endif
+    return QWidget::nativeEvent(eventType, message, result);
 }
 
 void MainWindow::updateDriverUi()
@@ -337,38 +395,6 @@ void MainWindow::onClear()
     }, QStringLiteral("清除"));
 }
 
-QPixmap MainWindow::grabMonitor(const MonitorInfo &mon) const
-{
-    QPixmap pm;
-    const QList<QScreen *> screens = QGuiApplication::screens();
-    for (QScreen *s : screens) {
-        if (s->geometry() == mon.geometry || s->name().contains(mon.deviceName.section(QLatin1Char('.'), -1))) {
-            pm = s->grabWindow(0);
-            break;
-        }
-    }
-    if (pm.isNull()) {
-        for (QScreen *s : screens) {
-            if (s->geometry().intersects(mon.geometry.adjusted(8, 8, -8, -8))) {
-                pm = s->grabWindow(0);
-                break;
-            }
-        }
-    }
-    if (pm.isNull() && !screens.isEmpty())
-        pm = screens.first()->grabWindow(0);
-    if (pm.isNull())
-        return {};
-
-    // 只在抓屏侧 Smooth 缩一次；PreviewPane 若尺寸已对齐则不再缩放
-    const QSize target = m_preview ? m_preview->size() : QSize(960, 600);
-    if (target.width() > 1 && target.height() > 1
-        && (pm.width() > target.width() || pm.height() > target.height())) {
-        pm = pm.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    }
-    return pm;
-}
-
 QVector<MonitorInfo> MainWindow::matchedVirtuals() const
 {
     QVector<MonitorInfo> pool;
@@ -428,7 +454,9 @@ void MainWindow::refreshPreview()
         m_title->setStatusHint(QStringLiteral("%1 · 未上线").arg(label));
         return;
     }
-    const MonitorInfo &mon = virtuals[m_tabIndex];
+    const MonitorInfo mon = virtuals[m_tabIndex];
+    const QSize target = m_preview->size();
+    const int tab = m_tabIndex;
 
     m_title->setStatusHint(QStringLiteral("%1  %2  %3×%4")
                                .arg(label)
@@ -436,11 +464,25 @@ void MainWindow::refreshPreview()
                                .arg(mon.geometry.width())
                                .arg(mon.geometry.height()));
 
+    // GDI 抓屏 + 缩放放工作线程，UI 不卡
     m_grabBusy = true;
-    const QPixmap pm = grabMonitor(mon);
-    m_grabBusy = false;
-    if (pm.isNull())
-        m_preview->setPlaceholder(QStringLiteral("抓屏失败"));
-    else
-        m_preview->setPixmap(pm);
+    auto *th = QThread::create([this, mon, target, label, tab]() {
+        QImage img = WinDisplay::captureDesktopRect(mon.geometry);
+        if (!img.isNull() && target.width() > 1 && target.height() > 1
+            && (img.width() > target.width() || img.height() > target.height())) {
+            img = img.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        QMetaObject::invokeMethod(this, [this, img, label, tab]() {
+            m_grabBusy = false;
+            if (!m_previewOn || tab != m_tabIndex)
+                return;
+            if (img.isNull())
+                m_preview->setPlaceholder(QStringLiteral("抓屏失败"));
+            else
+                m_preview->setPixmap(QPixmap::fromImage(img));
+            Q_UNUSED(label);
+        }, Qt::QueuedConnection);
+    });
+    connect(th, &QThread::finished, th, &QObject::deleteLater);
+    th->start();
 }
