@@ -16,15 +16,20 @@ dist\VirtualScreen.exe
 
 ### 单文件绿色版（Enigma Virtual Box）
 
-Qt 本身不是「一个 exe 走天下」；常用做法是 **windeployqt 收齐 DLL → Enigma Virtual Box 虚拟进主程序**。
+Qt 不是静态单文件；做法是 **windeployqt 收齐 DLL → EVB 虚拟进主程序**。
 
 ```powershell
 .\pack_evb.ps1
 ```
 
-首次会打开 EVB，按提示把 `build\evb_stage` 里的 DLL/插件打进 `dist\portable\VirtualScreen.exe`，并另存 `pack\VirtualScreen.evb`；之后脚本可自动打包。
+脚本会编译、准备 `build\evb_stage`，并打开 EVB。按控制台里那 **5 步**点完即可（比自动点对话框靠谱）。  
+输出：`dist\portable\VirtualScreen.exe`。`config.json` / `profiles\` 放在该 exe **旁边**，不要打进虚拟盒。
 
-注意：`config.json` / `profiles\` 不要打进虚拟盒，放在便携 exe **旁边**，方便读写。
+首次在 EVB 里 Save Project 为 `pack\VirtualScreen.evb` 后，以后也可用：
+
+```text
+enigmavbconsole.exe pack\VirtualScreen.evb -input build\evb_stage\VirtualScreen.exe -output dist\portable\VirtualScreen.exe
+```
 
 ## 编译
 

@@ -1,20 +1,20 @@
-# 用 Enigma Virtual Box 打成单文件绿色包
-# 依赖：已安装 EVB（本机默认 C:\ZYL\tools\enigma-vb\app）
+# 准备单文件打包目录，并打开 Enigma Virtual Box（手工点几下即可）
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$evbConsole = "C:\ZYL\tools\enigma-vb\app\enigmavbconsole.exe"
 $evbGui = "C:\ZYL\tools\enigma-vb\app\enigmavb.exe"
-$project = Join-Path $PSScriptRoot "pack\VirtualScreen.evb"
+if (-not (Test-Path $evbGui)) {
+    $evbGui = "${env:ProgramFiles(x86)}\Enigma Virtual Box\enigmavb.exe"
+}
 $stage = Join-Path $PSScriptRoot "build\evb_stage"
 $outDir = Join-Path $PSScriptRoot "dist\portable"
 $dist = Join-Path $PSScriptRoot "dist"
 
-Write-Host "== 1) 先正常编译并 windeployqt =="
+Write-Host "== 编译 =="
 & "$PSScriptRoot\build_qt.ps1"
 if ($LASTEXITCODE -ne 0) { throw "编译失败" }
 
-Write-Host "== 2) 准备打包目录（不含 config/profiles，便于旁边可写） =="
+Write-Host "== 准备 stage（Qt DLL + 插件 + VC 运行库） =="
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage, $outDir | Out-Null
 Copy-Item "$dist\VirtualScreen.exe" $stage
@@ -27,48 +27,32 @@ foreach ($f in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
     if (Test-Path $src) { Copy-Item $src $stage -Force }
 }
 
+# 清掉上次误拷进 portable 的散文件
+Get-ChildItem $outDir -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
 $inputExe = Join-Path $stage "VirtualScreen.exe"
 $outputExe = Join-Path $outDir "VirtualScreen.exe"
 
-if (Test-Path $project) {
-    Write-Host "== 3) 用已保存的 .evb 工程打包 =="
-    & $evbConsole $project -input $inputExe -output $outputExe
-    if ($LASTEXITCODE -ne 0) { throw "enigmavbconsole 失败" }
+Write-Host ""
+Write-Host "stage 已就绪。请在 Enigma Virtual Box 里按下面 5 步操作（约半分钟）："
+Write-Host "  1. Input : $inputExe"
+Write-Host "  2. Output: $outputExe"
+Write-Host "  3. Add... → Add Folder Recursive → 选中目录："
+Write-Host "       $stage"
+Write-Host "     点「确定」"
+Write-Host "  4. 若树里出现 VirtualScreen.exe，选中后点 Remove（主程序不必再虚拟一份）"
+Write-Host "  5. 点 Process；完成后 File → Save Project As →"
+Write-Host "       $(Join-Path $PSScriptRoot 'pack\VirtualScreen.evb')"
+Write-Host ""
+Write-Host "打完后把 dist\profiles 和 config.example.json 拷到 dist\portable\ 旁边即可。"
+Write-Host ""
+
+if (Test-Path $evbGui) {
+    # 路径先放进剪贴板，方便粘贴
+    Set-Clipboard -Value $stage
+    Start-Process $evbGui
+    Write-Host "已打开 EVB；stage 路径已复制到剪贴板。"
 } else {
-    Write-Host @"
-
-还没有 pack\VirtualScreen.evb。请在 Enigma Virtual Box 里做一次：
-
-1. Enter Input File Name:
-   $inputExe
-2. Enter Output File Name:
-   $outputExe
-3. 点 Add...，把下面这些加进 Virtual Box Files（不要重复加 exe 自己）：
-   - $stage\*.dll
-   - $stage\platforms
-   - $stage\imageformats
-   - $stage\iconengines
-   - $stage\styles
-   添加时选「保持相对目录 / Recurse」类选项，保证 platforms\qwindows.dll 路径正确。
-4. Files Options → 勾选压缩（可选）
-5. 点 Process
-6. 菜单 File → Save Project As…
-   保存为：$project
-   以后再跑本脚本就会自动打包。
-
-"@
-    if (Test-Path $evbGui) { Start-Process $evbGui }
-    exit 0
+    Write-Host "未找到 enigmavb.exe，请先安装 Enigma Virtual Box。"
 }
-
-# 旁边放配置模板，单文件 exe 读写真实磁盘上的这些文件
-Copy-Item "$dist\config.example.json" $outDir -Force -ErrorAction SilentlyContinue
-if (Test-Path "$dist\profiles") {
-    Copy-Item "$dist\profiles" $outDir -Recurse -Force
-}
-if (-not (Test-Path "$outDir\config.json") -and (Test-Path "$dist\config.example.json")) {
-    Copy-Item "$dist\config.example.json" "$outDir\config.json"
-}
-
-Write-Host "OK 单文件包: $outputExe"
-Get-Item $outputExe | Format-List FullName, Length, LastWriteTime
