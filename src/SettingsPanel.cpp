@@ -190,16 +190,31 @@ void SettingsDialog::rebuildRows(int count)
         r.height = makeSpin(box, 640, 4320, 8, 1080);
         r.scale = makeSpin(box, 100, 500, 25, 100);
         r.hz = makeSpin(box, 30, 240, 1, 60);
+        r.width->setMinimumWidth(90);
+        r.height->setMinimumWidth(90);
+        r.scale->setMinimumWidth(80);
+        r.hz->setMinimumWidth(80);
+
         fl->addRow(QStringLiteral("屏%1 名称").arg(i + 1), r.label);
+
         auto *res = new QHBoxLayout();
+        res->setSpacing(6);
         res->addWidget(r.width);
         res->addWidget(new QLabel(QStringLiteral("×"), box));
         res->addWidget(r.height);
-        res->addWidget(new QLabel(QStringLiteral("缩放%"), box));
-        res->addWidget(r.scale);
-        res->addWidget(new QLabel(QStringLiteral("Hz"), box));
-        res->addWidget(r.hz);
+        res->addStretch();
         fl->addRow(QStringLiteral("分辨率"), res);
+
+        auto *dpiHz = new QHBoxLayout();
+        dpiHz->setSpacing(6);
+        dpiHz->addWidget(r.scale);
+        dpiHz->addWidget(new QLabel(QStringLiteral("%"), box));
+        dpiHz->addSpacing(16);
+        dpiHz->addWidget(new QLabel(QStringLiteral("刷新率"), box));
+        dpiHz->addWidget(r.hz);
+        dpiHz->addWidget(new QLabel(QStringLiteral("Hz"), box));
+        dpiHz->addStretch();
+        fl->addRow(QStringLiteral("缩放"), dpiHz);
         m_rows->insertWidget(m_rows->count() - 1, box);
         m_rowEdits.push_back(r);
     }
