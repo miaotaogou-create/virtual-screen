@@ -116,6 +116,11 @@ bool VddService::ensureParsecOpen(QString *err)
 
 void VddService::startPing()
 {
+    // 保活定时器必须在对象所在线程（主线程）启动
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, [this]() { startPing(); }, Qt::QueuedConnection);
+        return;
+    }
     if (m_ping && !m_ping->isActive())
         m_ping->start();
 }

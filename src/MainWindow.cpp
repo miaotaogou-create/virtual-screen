@@ -14,6 +14,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QEvent>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -171,16 +172,20 @@ MainWindow::MainWindow(QWidget *parent)
 
     rebuildTabs();
     if (m_vdd->driverReady()) {
-        if (m_cfg.displays.isEmpty())
+        if (m_cfg.displays.isEmpty()) {
             m_title->setStatusHint(QStringLiteral("驱动就绪 · 点「添加显示」"));
-        else
-            m_title->setStatusHint(QStringLiteral("已加载方案「%1」· 可添加/右键改规格")
+            refreshGuide();
+        } else {
+            m_title->setStatusHint(QStringLiteral("正在挂上方案「%1」…")
                                        .arg(m_cfg.profileName.isEmpty() ? QStringLiteral("当前")
                                                                        : m_cfg.profileName));
+            // 配置里有屏但进程重启后 ping 已断，自动按方案挂回
+            QTimer::singleShot(400, this, &MainWindow::onApply);
+        }
     } else {
         updateDriverUi();
+        refreshGuide();
     }
-    refreshGuide();
 }
 
 void MainWindow::changeEvent(QEvent *e)
@@ -889,75 +894,70 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
     m_title->setStatusHint(title + QStringLiteral("中…"));
     m_preview->setGuide(
         title + QStringLiteral("中…"),
-        QStringLiteral("请稍候，正在操作虚拟显示驱动。\n窗口可能会短暂无响应，属正常现象。"),
+        QStringLiteral("请稍候，正在操作虚拟显示驱动。"),
         QString(),
         QString());
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    auto *th = QThread::create([this, work, title]() {
-        QString msg;
-        bool ok = true;
-        try {
-            msg = work();
-        } catch (const std::exception &e) {
-            ok = false;
-            msg = QString::fromLocal8Bit(e.what());
-        } catch (...) {
-            ok = false;
-            msg = QStringLiteral("未知错误");
-        }
-        if (ok)
-            ok = looksSuccess(title, msg);
-        QMetaObject::invokeMethod(this, [this, msg, ok, title]() {
-            m_busy = false;
-            setBusyUi(false);
-            m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0));
-            if (!ok) {
-                QMessageBox::warning(this, title, msg);
-                setPreviewEnabled(false);
-                rebuildTabs();
-                refreshGuide();
-                return;
-            }
+    // 必须在主线程操作：保活 QTimer 不能跨线程 start，否则加屏约 1 秒后被驱动摘掉
+    QString msg;
+    bool ok = true;
+    try {
+        msg = work();
+    } catch (const std::exception &e) {
+        ok = false;
+        msg = QString::fromLocal8Bit(e.what());
+    } catch (...) {
+        ok = false;
+        msg = QStringLiteral("未知错误");
+    }
+    if (ok)
+        ok = looksSuccess(title, msg);
 
-            if (title == QStringLiteral("添加")) {
-                m_cfg.displays.push_back(m_pendingSpec);
-                m_tabIndex = m_cfg.displays.size() - 1;
-            } else if (title == QStringLiteral("删除") && m_pendingIndex >= 0
-                       && m_pendingIndex < m_cfg.displays.size()) {
-                m_cfg.displays.removeAt(m_pendingIndex);
-                if (m_tabIndex >= m_cfg.displays.size())
-                    m_tabIndex = qMax(0, m_cfg.displays.size() - 1);
-            } else if (title == QStringLiteral("更新") && m_pendingIndex >= 0
-                       && m_pendingIndex < m_cfg.displays.size()) {
-                m_cfg.displays[m_pendingIndex] = m_pendingSpec;
-            } else if (title == QStringLiteral("清除")) {
-                m_cfg.displays.clear();
-                m_tabIndex = 0;
-            } else if (title == QStringLiteral("应用")) {
-                // m_cfg 已是目标方案；tracked 由 applyConfig 重建
-            }
+    m_busy = false;
+    setBusyUi(false);
+    m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0));
+    if (!ok) {
+        QMessageBox::warning(this, title, msg);
+        setPreviewEnabled(false);
+        rebuildTabs();
+        refreshGuide();
+        return;
+    }
 
-            persistCfg();
-            rebuildTabs();
-            updateDriverUi();
-            if (msg.contains(QStringLiteral("警告")))
-                QMessageBox::warning(this, title, msg);
+    if (title == QStringLiteral("添加")) {
+        m_cfg.displays.push_back(m_pendingSpec);
+        m_tabIndex = m_cfg.displays.size() - 1;
+    } else if (title == QStringLiteral("删除") && m_pendingIndex >= 0
+               && m_pendingIndex < m_cfg.displays.size()) {
+        m_cfg.displays.removeAt(m_pendingIndex);
+        if (m_tabIndex >= m_cfg.displays.size())
+            m_tabIndex = qMax(0, m_cfg.displays.size() - 1);
+    } else if (title == QStringLiteral("更新") && m_pendingIndex >= 0
+               && m_pendingIndex < m_cfg.displays.size()) {
+        m_cfg.displays[m_pendingIndex] = m_pendingSpec;
+    } else if (title == QStringLiteral("清除")) {
+        m_cfg.displays.clear();
+        m_tabIndex = 0;
+    }
 
-            if (title == QStringLiteral("清除") || m_cfg.displays.isEmpty()) {
-                setPreviewEnabled(false);
-                refreshGuide();
-                return;
-            }
+    persistCfg();
+    rebuildTabs();
+    updateDriverUi();
+    if (msg.contains(QStringLiteral("警告")) || msg.contains(QStringLiteral("提示：")))
+        QMessageBox::information(this, title, msg);
 
-            setPreviewEnabled(true);
-            m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0)
-                                   + QStringLiteral(" · 预览已打开"));
-            QTimer::singleShot(800, this, &MainWindow::refreshPreview);
-            QTimer::singleShot(2000, this, &MainWindow::refreshPreview);
-        }, Qt::QueuedConnection);
-    });
-    connect(th, &QThread::finished, th, &QObject::deleteLater);
-    th->start();
+    if (title == QStringLiteral("清除") || m_cfg.displays.isEmpty()) {
+        setPreviewEnabled(false);
+        refreshGuide();
+        return;
+    }
+
+    setPreviewEnabled(true);
+    m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0)
+                           + QStringLiteral(" · 预览已打开"));
+    QTimer::singleShot(500, this, &MainWindow::refreshPreview);
+    QTimer::singleShot(1500, this, &MainWindow::refreshPreview);
 }
 
 void MainWindow::onApply()
