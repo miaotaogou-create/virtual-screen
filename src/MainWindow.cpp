@@ -6,6 +6,7 @@
 #include "TitleBar.h"
 #include "VddService.h"
 
+#include <QCoreApplication>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>
@@ -18,6 +19,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPixmap>
+#include <QProcess>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QThread>
@@ -261,8 +263,72 @@ void MainWindow::setBusyUi(bool busy)
 
 void MainWindow::openDriverPage()
 {
+    const QString setup = bundledDriverInstaller();
+    if (!setup.isEmpty()) {
+        onInstallDriver();
+        return;
+    }
     QDesktopServices::openUrl(QUrl(QLatin1String(kDriverReleasesUrl)));
     m_title->setStatusHint(QStringLiteral("已打开驱动下载页"));
+}
+
+QString MainWindow::bundledDriverInstaller() const
+{
+    const QDir app(QCoreApplication::applicationDirPath());
+    const QStringList cands = {
+        app.filePath(QStringLiteral("parsec-vdd/parsec-vdd-0.45.0.0.exe")),
+        app.filePath(QStringLiteral("../vendor/parsec-vdd/parsec-vdd-0.45.0.0.exe")),
+        app.filePath(QStringLiteral("../../vendor/parsec-vdd/parsec-vdd-0.45.0.0.exe")),
+    };
+    for (const QString &p : cands) {
+        if (QFileInfo::exists(p))
+            return QFileInfo(p).absoluteFilePath();
+    }
+    return {};
+}
+
+void MainWindow::onInstallDriver()
+{
+    const QString setup = bundledDriverInstaller();
+    if (setup.isEmpty()) {
+        QDesktopServices::openUrl(QUrl(QLatin1String(kDriverReleasesUrl)));
+        QMessageBox::information(
+            this,
+            QStringLiteral("未找到捆绑驱动"),
+            QStringLiteral("本目录没有 parsec-vdd\\parsec-vdd-0.45.0.0.exe。\n"
+                           "已打开网页；也可从仓库 vendor\\parsec-vdd 拷到 exe 旁。"));
+        return;
+    }
+    if (!Elevate::isAdmin()) {
+        if (!confirmElevate(QStringLiteral("安装驱动")))
+            return;
+        if (!Elevate::relaunchAsAdmin({QStringLiteral("--install-driver")}))
+            QMessageBox::warning(this, QStringLiteral("提权"), QStringLiteral("无法弹出 UAC，或已取消。"));
+        else
+            close();
+        return;
+    }
+
+    m_title->setStatusHint(QStringLiteral("正在安装 Parsec VDD…"));
+    const int code = QProcess::execute(setup, {QStringLiteral("/S")});
+    QThread::msleep(1500);
+    updateDriverUi();
+    if (m_vdd->driverReady()) {
+        m_title->setStatusHint(QStringLiteral("驱动安装完成"));
+        QMessageBox::information(this, QStringLiteral("安装完成"),
+                                 QStringLiteral("已检测到 Parsec Virtual Display Adapter。\n可以点「应用」创建虚拟屏了。"));
+        refreshGuide();
+    } else {
+        m_title->setStatusHint(QStringLiteral("安装结束，未检测到驱动"));
+        QMessageBox::warning(
+            this,
+            QStringLiteral("安装异常"),
+            QStringLiteral("安装器已运行（退出码 %1），但尚未检测到适配器。\n"
+                           "请打开设备管理器查看，或手动再跑一次：\n%2")
+                .arg(code)
+                .arg(setup));
+        refreshGuide();
+    }
 }
 
 void MainWindow::refreshGuide()
@@ -271,14 +337,20 @@ void MainWindow::refreshGuide()
         return;
 
     if (!m_vdd->driverReady()) {
+        const QString setup = bundledDriverInstaller();
         m_preview->setGuide(
-            QStringLiteral("还差一步：安装虚拟显示驱动"),
-            QStringLiteral(
-                "1. 点下方「打开驱动下载页」，安装 Parsec VDD（ParsecVDisplay）\n"
-                "2. 装好后设备里应出现 Parsec Virtual Display Adapter\n"
-                "3. 回到本程序，点顶栏「应用」创建虚拟屏\n"
-                "（建议先关掉官方 ParsecVDisplay，避免抢控）"),
-            QStringLiteral("打开驱动下载页"),
+            QStringLiteral("还差一步：安装 Parsec 虚拟显示驱动"),
+            setup.isEmpty()
+                ? QStringLiteral(
+                      "1. 点下方打开下载页，安装 Parsec VDD\n"
+                      "2. 装好后设备里应出现 Parsec Virtual Display Adapter\n"
+                      "3. 回到本程序，点顶栏「应用」")
+                : QStringLiteral(
+                      "本程序已捆绑驱动安装包。\n"
+                      "1. 点下方「安装捆绑驱动」（会弹 UAC）\n"
+                      "2. 装好后点顶栏「应用」创建虚拟屏\n"
+                      "（建议不要同时开官方 ParsecVDisplay）"),
+            setup.isEmpty() ? QStringLiteral("打开驱动下载页") : QStringLiteral("安装捆绑驱动"),
             QStringLiteral("查看安装说明"));
         return;
     }
@@ -299,10 +371,14 @@ void MainWindow::refreshGuide()
 
 void MainWindow::onGuidePrimary()
 {
-    if (!m_vdd->driverReady())
-        openDriverPage();
-    else
+    if (!m_vdd->driverReady()) {
+        if (!bundledDriverInstaller().isEmpty())
+            onInstallDriver();
+        else
+            openDriverPage();
+    } else {
         onApply();
+    }
 }
 
 void MainWindow::onGuideSecondary()

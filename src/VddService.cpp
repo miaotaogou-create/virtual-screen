@@ -77,9 +77,10 @@ QString VddService::installDriverHint() const
 {
     return QStringLiteral(
         "未检测到 Parsec Virtual Display Driver。\n"
-        "请安装：https://github.com/nomi-san/parsec-vdd/releases\n"
-        "（ParsecVDisplay 安装包会带上驱动）。\n"
-        "装好后设备管理器应出现「Parsec Virtual Display Adapter」，再点「应用」。\n"
+        "优先：本程序目录下 parsec-vdd\\parsec-vdd-0.45.0.0.exe（点「安装捆绑驱动」）\n"
+        "或仓库：scripts\\install_parsec_vdd.ps1 / vendor\\parsec-vdd\\\n"
+        "网页：https://github.com/nomi-san/parsec-vdd/releases\n"
+        "装好后设备管理器应出现「Parsec Virtual Display Adapter」。\n"
         "使用本程序时建议先关掉官方 ParsecVDisplay，避免抢控。");
 }
 

@@ -29,6 +29,8 @@ int main(int argc, char *argv[])
         QTimer::singleShot(300, &w, &MainWindow::onApply);
     else if (args.contains(QStringLiteral("--clear")))
         QTimer::singleShot(300, &w, &MainWindow::onClear);
+    else if (args.contains(QStringLiteral("--install-driver")))
+        QTimer::singleShot(300, &w, &MainWindow::onInstallDriver);
 
     return app.exec();
 }

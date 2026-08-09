@@ -26,6 +26,7 @@ public:
 public slots:
     void onApply();
     void onClear();
+    void onInstallDriver();
 
 protected:
     void changeEvent(QEvent *e) override;
@@ -53,6 +54,7 @@ private:
     void setPreviewEnabled(bool on);
     void setBusyUi(bool busy);
     void openDriverPage();
+    QString bundledDriverInstaller() const;
     bool confirmElevate(const QString &action);
     void runBg(const std::function<QString()> &work, const QString &title);
     /** 按配置顺序匹配虚拟屏：先分辨率，再从左到右。 */

@@ -30,4 +30,14 @@ if (-not (Test-Path $exe)) { throw "未生成 $exe" }
 $windeploy = "C:\Qt\Qt5.14.2\5.14.2\msvc2017_64\bin\windeployqt.exe"
 & $windeploy --release --no-translations --no-angle --no-opengl-sw $exe
 
+# 捆绑 Parsec 驱动安装包到 dist，方便拷贝整目录到别的电脑
+$vendorDrv = Join-Path $PSScriptRoot "vendor\parsec-vdd\parsec-vdd-0.45.0.0.exe"
+$distDrvDir = Join-Path $PSScriptRoot "dist\parsec-vdd"
+if (Test-Path $vendorDrv) {
+    New-Item -ItemType Directory -Force -Path $distDrvDir | Out-Null
+    Copy-Item $vendorDrv $distDrvDir -Force
+    Copy-Item (Join-Path $PSScriptRoot "vendor\parsec-vdd\README.md") $distDrvDir -Force -ErrorAction SilentlyContinue
+    Write-Host "已附带 dist\parsec-vdd\parsec-vdd-0.45.0.0.exe"
+}
+
 Write-Host "OK $exe"

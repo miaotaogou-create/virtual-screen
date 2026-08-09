@@ -63,10 +63,13 @@ enigmavbconsole.exe pack\VirtualScreen.evb -input build\evb_stage\VirtualScreen.
 
 ## 说明
 
-- **虚拟屏驱动**：仅使用 [Parsec VDD](https://github.com/nomi-san/parsec-vdd)（`Parsec Virtual Display Adapter`）。不再使用 MTT Virtual Display Driver。
-- 未装驱动时：从 [Releases](https://github.com/nomi-san/parsec-vdd/releases) 安装 ParsecVDisplay 即可
+- **虚拟屏驱动**：仅使用 [Parsec VDD](https://github.com/nomi-san/parsec-vdd)（`Parsec Virtual Display Adapter`）
+- **仓库已捆绑驱动安装包**：`vendor\parsec-vdd\parsec-vdd-0.45.0.0.exe`（官方原样转发，约 500KB）
+  - 一键安装：`.\scripts\install_parsec_vdd.ps1`（会要管理员）
+  - 或 GUI：未装驱动时点「安装捆绑驱动」
+  - `build_qt.ps1` 会把安装包拷到 `dist\parsec-vdd\`，整份 dist 带走即可
 - 使用本程序「应用」时建议先关掉官方 ParsecVDisplay，避免抢控
 - **保持 VirtualScreen 运行**：Parsec 需要约 100ms 保活 ping；关掉本程序后虚拟屏约 1 秒会自动卸掉
-- 普通启动**不强制**管理员；点「应用 / 清除」时再弹 UAC（写自定义分辨率注册表需要）
+- 普通启动**不强制**管理员；点「应用 / 清除 / 安装驱动」时再弹 UAC
 - **缩放%**：应用配置时会按屏写入系统 DPI；失败时可到 Windows「显示设置」手动调
 - 显示设置里若出现 `1|2`，说明两块屏在「复制」模式，请改成「扩展这些显示器」
