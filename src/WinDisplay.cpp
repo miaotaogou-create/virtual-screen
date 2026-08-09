@@ -371,33 +371,51 @@ bool moveWindowToMonitor(qulonglong hwndVal, const QRect &monitorGeo)
     if (!hwnd || !IsWindow(hwnd))
         return false;
 
-    // 以目标屏中心找 HMONITOR，再用系统 rcMonitor（避免只靠 QRect 在 DPI 下偏一截）
-    POINT pt{monitorGeo.center().x(), monitorGeo.center().y()};
-    HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    RECT seed{monitorGeo.x(), monitorGeo.y(),
+              monitorGeo.x() + monitorGeo.width(),
+              monitorGeo.y() + monitorGeo.height()};
+    HMONITOR hmon = MonitorFromRect(&seed, MONITOR_DEFAULTTONULL);
     MONITORINFO mi{};
     mi.cbSize = sizeof(mi);
-    if (!GetMonitorInfoW(hmon, &mi)) {
-        mi.rcMonitor.left = monitorGeo.x();
-        mi.rcMonitor.top = monitorGeo.y();
-        mi.rcMonitor.right = monitorGeo.x() + monitorGeo.width();
-        mi.rcMonitor.bottom = monitorGeo.y() + monitorGeo.height();
+    RECT use = seed;
+    if (hmon && GetMonitorInfoW(hmon, &mi)) {
+        // 仅当命中监视器中心落在目标矩形内才采用，防止 DPI/坐标偏差吸到主屏
+        const int cx = (mi.rcMonitor.left + mi.rcMonitor.right) / 2;
+        const int cy = (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2;
+        if (cx >= seed.left && cx < seed.right && cy >= seed.top && cy < seed.bottom)
+            use = mi.rcMonitor;
     }
 
-    const int x = mi.rcMonitor.left;
-    const int y = mi.rcMonitor.top;
-    const int w = mi.rcMonitor.right - mi.rcMonitor.left;
-    const int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    const int x = use.left;
+    const int y = use.top;
+    const int w = use.right - use.left;
+    const int h = use.bottom - use.top;
     if (w < 32 || h < 32)
         return false;
 
-    // 先退出最大化/最小化，再整窗贴到目标屏，最后真正最大化
-    ShowWindow(hwnd, SW_RESTORE);
-    SetWindowPos(hwnd, HWND_TOP, x, y, w, h,
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOCOPYBITS);
-    // SC_MAXIMIZE 比 ShowWindow(SW_MAXIMIZE) 更贴近标题栏最大化，Qt 窗也吃这套
-    SendMessageW(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-    SetForegroundWindow(hwnd);
-    BringWindowToTop(hwnd);
+    // 去掉最大化标志再贴满目标屏；全程 NOACTIVATE，避免抢焦点把另一窗拽回主屏
+    if (IsZoomed(hwnd) || IsIconic(hwnd)) {
+        WINDOWPLACEMENT wp{};
+        wp.length = sizeof(wp);
+        if (GetWindowPlacement(hwnd, &wp)) {
+            wp.showCmd = SW_SHOWNOACTIVATE;
+            SetWindowPlacement(hwnd, &wp);
+        }
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+                          GetWindowLongPtrW(hwnd, GWL_STYLE) & ~WS_MAXIMIZE);
+    }
+
+    const BOOL ok = SetWindowPos(hwnd, nullptr, x, y, w, h,
+                                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+    if (!ok)
+        return false;
+
+    // 再标成最大化（不激活），这样标题栏显示「还原」，布局按最大化算
+    SetWindowLongPtrW(hwnd, GWL_STYLE,
+                      GetWindowLongPtrW(hwnd, GWL_STYLE) | WS_MAXIMIZE);
+    SetWindowPos(hwnd, nullptr, x, y, w, h,
+                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE
+                     | SWP_SHOWWINDOW);
     return true;
 }
 

@@ -667,10 +667,17 @@ void MainWindow::onPlaceWindow()
     const MonitorInfo mon = virtuals[m_tabIndex];
 
     QDialog dlg(this);
-    dlg.setWindowTitle(QStringLiteral("投放窗口到「%1」").arg(m_cfg.displays[m_tabIndex].label));
+    dlg.setWindowTitle(QStringLiteral("投放窗口到「%1」· %2×%3")
+                           .arg(m_cfg.displays[m_tabIndex].label)
+                           .arg(mon.geometry.width())
+                           .arg(mon.geometry.height()));
     dlg.resize(520, 420);
     auto *lay = new QVBoxLayout(&dlg);
-    lay->addWidget(new QLabel(QStringLiteral("选择要移动的顶层窗口："), &dlg));
+    lay->addWidget(new QLabel(
+        QStringLiteral("选择要移动的顶层窗口（已在虚拟屏上的窗也会列出；请选另一个）：\n目标屏位置 (%1,%2)")
+            .arg(mon.geometry.x())
+            .arg(mon.geometry.y()),
+        &dlg));
     auto *list = new QListWidget(&dlg);
     const QVector<TopWindowInfo> wins = WinDisplay::listTopWindows();
     for (const TopWindowInfo &w : wins) {
@@ -823,37 +830,15 @@ void MainWindow::onClear()
 
 QVector<MonitorInfo> MainWindow::matchedVirtuals() const
 {
+    // 按从左到右顺序 1:1 对应屏1/屏2；不用分辨率匹配（125% 缩放时几何可能对不上）
     QVector<MonitorInfo> pool;
     for (const MonitorInfo &m : WinDisplay::listMonitors()) {
         if (m.likelyVirtual)
             pool.push_back(m);
     }
     QVector<MonitorInfo> out(m_cfg.displays.size());
-    QVector<bool> used(pool.size(), false);
-    for (int i = 0; i < m_cfg.displays.size(); ++i) {
-        const DisplaySpec &spec = m_cfg.displays[i];
-        int best = -1;
-        for (int j = 0; j < pool.size(); ++j) {
-            if (used[j])
-                continue;
-            if (pool[j].geometry.width() == spec.width && pool[j].geometry.height() == spec.height) {
-                best = j;
-                break;
-            }
-        }
-        if (best < 0) {
-            for (int j = 0; j < pool.size(); ++j) {
-                if (!used[j]) {
-                    best = j;
-                    break;
-                }
-            }
-        }
-        if (best >= 0) {
-            used[best] = true;
-            out[i] = pool[best];
-        }
-    }
+    for (int i = 0; i < m_cfg.displays.size() && i < pool.size(); ++i)
+        out[i] = pool[i];
     return out;
 }
 
