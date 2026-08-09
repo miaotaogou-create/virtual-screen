@@ -84,29 +84,17 @@ MainWindow::MainWindow(QWidget *parent)
     m_title->setAdminHint(Elevate::isAdmin() ? QStringLiteral("管理员") : QStringLiteral("普通权限"));
     root->addWidget(m_title);
 
-    m_tabBar = new QWidget(this);
-    m_tabBar->setFixedHeight(36);
-    m_tabBar->setStyleSheet(QStringLiteral("background:#0B1220;"));
-    m_tabLay = new QHBoxLayout(m_tabBar);
-    m_tabLay->setContentsMargins(10, 4, 10, 4);
-    m_tabLay->setSpacing(6);
-    m_tabLay->addStretch();
-    root->addWidget(m_tabBar);
-
     m_preview = new PreviewPane(this);
     root->addWidget(m_preview, 1);
 
     m_bottom = new QWidget(this);
     m_bottom->setFixedHeight(52);
     m_bottom->setStyleSheet(QStringLiteral("background:#111827; border-top:1px solid #1E293B;"));
-    auto *bot = new QHBoxLayout(m_bottom);
-    bot->setContentsMargins(12, 8, 12, 8);
-    bot->setSpacing(8);
-
-    auto *brand = new QLabel(QStringLiteral("VirtualScreen"), m_bottom);
-    brand->setStyleSheet(QStringLiteral("color:#94A3B8; font-weight:600;"));
-    bot->addWidget(brand);
-    bot->addStretch();
+    m_tabLay = new QHBoxLayout(m_bottom);
+    m_tabLay->setContentsMargins(12, 8, 12, 8);
+    m_tabLay->setSpacing(8);
+    // 左侧：虚拟屏标签（rebuildTabs 插入）；中间撑开；右侧：操作按钮
+    m_tabLay->addStretch();
 
     auto *profileBtn = new QPushButton(QStringLiteral("方案…"), m_bottom);
     auto *refreshBtn = new QPushButton(QStringLiteral("刷新"), m_bottom);
@@ -120,11 +108,11 @@ MainWindow::MainWindow(QWidget *parent)
     addBtn->setStyleSheet(btnStyle(true));
     for (QPushButton *b : {profileBtn, refreshBtn, placeBtn, customBtn, addBtn})
         b->setCursor(Qt::PointingHandCursor);
-    bot->addWidget(profileBtn);
-    bot->addWidget(refreshBtn);
-    bot->addWidget(placeBtn);
-    bot->addWidget(customBtn);
-    bot->addWidget(addBtn);
+    m_tabLay->addWidget(profileBtn);
+    m_tabLay->addWidget(refreshBtn);
+    m_tabLay->addWidget(placeBtn);
+    m_tabLay->addWidget(customBtn);
+    m_tabLay->addWidget(addBtn);
     root->addWidget(m_bottom);
 
     m_settings = new SettingsDialog(this);
@@ -351,23 +339,23 @@ void MainWindow::rebuildTabs()
     }
     m_tabs.clear();
 
-    // stretch 在索引 0，预览按钮在末尾 → 插在 stretch 之后
+    // 插在左侧 stretch 之前：布局 = tabs… | stretch | 操作按钮
     for (int i = 0; i < m_cfg.displays.size(); ++i) {
         const DisplaySpec &spec = m_cfg.displays[i];
         const QString text = spec.label.trimmed().isEmpty()
                                  ? QStringLiteral("虚拟屏%1").arg(i + 1)
                                  : spec.label.trimmed();
-        auto *btn = new QPushButton(text, m_tabBar);
+        auto *btn = new QPushButton(text, m_bottom);
         btn->setCursor(Qt::PointingHandCursor);
         btn->setEnabled(!m_busy);
         btn->setContextMenuPolicy(Qt::CustomContextMenu);
         const bool active = (i == m_tabIndex);
         btn->setStyleSheet(active
             ? QStringLiteral(
-                  "QPushButton { color:#fff; background:#0F766E; padding:4px 14px; border:none; }"
+                  "QPushButton { color:#fff; background:#0F766E; padding:6px 14px; border:none; }"
                   "QPushButton:hover { background:#0D9488; }")
             : QStringLiteral(
-                  "QPushButton { color:#CBD5E1; background:#1E293B; padding:4px 14px; border:1px solid #334155; }"
+                  "QPushButton { color:#CBD5E1; background:#1E293B; padding:6px 14px; border:1px solid #334155; }"
                   "QPushButton:hover { background:#334155; }"));
         btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz  缩放%5%\n右键可改规格 / 删除")
                             .arg(text)

@@ -62,7 +62,6 @@ private:
 
     AppConfig m_cfg;
     TitleBar *m_title = nullptr;
-    QWidget *m_tabBar = nullptr;
     QHBoxLayout *m_tabLay = nullptr;
     PreviewPane *m_preview = nullptr;
     QWidget *m_bottom = nullptr;
