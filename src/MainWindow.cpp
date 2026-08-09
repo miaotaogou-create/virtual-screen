@@ -71,6 +71,9 @@ MainWindow::MainWindow(QWidget *parent)
     setStyleSheet(QStringLiteral("MainWindow { background:#0B1220; }"));
 
     m_cfg = AppConfig::load();
+    // 启动不恢复上次屏列表，也不自动挂方案；由「添加显示」或「方案…」手动来
+    m_cfg.displays.clear();
+    m_cfg.profileName.clear();
     m_vdd = new VddService(this);
 
     auto *root = new QVBoxLayout(this);
@@ -172,20 +175,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     rebuildTabs();
     if (m_vdd->driverReady()) {
-        if (m_cfg.displays.isEmpty()) {
-            m_title->setStatusHint(QStringLiteral("驱动就绪 · 点「添加显示」"));
-            refreshGuide();
-        } else {
-            m_title->setStatusHint(QStringLiteral("正在挂上方案「%1」…")
-                                       .arg(m_cfg.profileName.isEmpty() ? QStringLiteral("当前")
-                                                                       : m_cfg.profileName));
-            // 配置里有屏但进程重启后 ping 已断，自动按方案挂回
-            QTimer::singleShot(400, this, &MainWindow::onApply);
-        }
+        m_title->setStatusHint(m_cfg.displays.isEmpty()
+                                   ? QStringLiteral("驱动就绪 · 点「添加显示」")
+                                   : QStringLiteral("驱动就绪 · 点「添加显示」或从「方案…」加载"));
     } else {
         updateDriverUi();
-        refreshGuide();
     }
+    refreshGuide();
 }
 
 void MainWindow::changeEvent(QEvent *e)
