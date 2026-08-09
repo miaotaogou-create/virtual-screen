@@ -58,7 +58,6 @@ private:
     void openDriverPage();
     QString bundledDriverInstaller() const;
     bool confirmElevate(const QString &action);
-    bool ensureAdminFor(const QString &action, const QStringList &args);
     void runBg(const std::function<QString()> &work, const QString &title);
     void persistCfg();
     DisplaySpec defaultSpec(int ordinal) const;

@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
     f.setPointSize(9);
     app.setFont(f);
 
-    // 普通启动不提权；仅「应用 / 清除」时再弹 UAC
+    // 加/删/改屏与官方一样不提权；仅装驱动需要管理员
     MainWindow w;
     w.show();
 

@@ -257,9 +257,9 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
     if (!ensureParsecOpen(&err))
         return err;
 
-    emit progress(QStringLiteral("写入自定义分辨率…"));
-    if (!writeParsecCustomModes(cfg, &err))
-        return err;
+    // 自定义模式写 HKLM 需要管理员；失败不阻断——驱动自带常见分辨率
+    QString customErr;
+    const bool customOk = writeParsecCustomModes(cfg, &customErr);
 
     const int want = cfg.displays.size();
     if (want > VDD_MAX_DISPLAYS)
@@ -289,7 +289,17 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
         QThread::msleep(180);
     }
 
-    return arrangeAndDpi(cfg) + QStringLiteral("。请保持本程序运行以维持虚拟屏。");
+    QString msg = arrangeAndDpi(cfg);
+    if (!msg.startsWith(QStringLiteral("已就绪")) && !msg.startsWith(QStringLiteral("已应用")))
+        return msg;
+    // 统一前缀，方便 UI 判成功
+    if (!msg.startsWith(QStringLiteral("已应用")))
+        msg = QStringLiteral("已应用。") + msg;
+    if (!customOk)
+        msg += QStringLiteral("\n提示：自定义分辨率未写入注册表（%1）。常用分辨率一般仍可用。")
+                   .arg(customErr);
+    msg += QStringLiteral("\n请保持本程序运行以维持虚拟屏。");
+    return msg;
 }
 
 QString VddService::clearVirtualDisplays()
@@ -315,7 +325,7 @@ QString VddService::clearVirtualDisplays()
     closeParsec();
 
     if (left > 0)
-        return QStringLiteral("已请求清除，但桌面仍看到 %1 块虚拟屏。").arg(left);
+        return QStringLiteral("已请求禁用，但桌面仍看到 %1 块虚拟屏。").arg(left);
     return QStringLiteral("已请求禁用虚拟屏，虚拟屏已从桌面移除。");
 }
 
@@ -327,50 +337,38 @@ QString VddService::addOne(const DisplaySpec &spec)
     if (m_parsecIndices.size() >= VDD_MAX_DISPLAYS)
         return QStringLiteral("最多 %1 块虚拟屏。").arg(VDD_MAX_DISPLAYS);
 
-    QVector<DisplaySpec> all;
-    // 合并已有模式 + 新模式写入注册表
-    for (const MonitorInfo &m : currentVirtuals()) {
-        DisplaySpec d;
-        d.width = m.geometry.width();
-        d.height = m.geometry.height();
-        d.hz = 60;
-        all.push_back(d);
-    }
-    all.push_back(spec);
-    if (!writeParsecCustomModes(all, &err))
-        return err;
-
+    // 与官方一致：加屏只走驱动 IOCTL，不写 HKLM、不提权
     const int idx = VddAddDisplay(static_cast<HANDLE>(m_parsec));
     if (idx < 0)
         return QStringLiteral("添加虚拟屏失败。");
     m_parsecIndices.push_back(idx);
-    QThread::msleep(300);
+    QThread::msleep(280);
 
-    AppConfig tmp;
-    // 用当前桌面虚拟屏数量构造临时配置做排列
     QVector<MonitorInfo> virtuals = waitVirtuals(m_parsecIndices.size());
-    for (int i = 0; i < virtuals.size(); ++i) {
-        DisplaySpec d;
-        d.label = QStringLiteral("虚拟屏%1").arg(i + 1);
-        if (i + 1 == m_parsecIndices.size()) {
-            d = spec;
-            if (d.label.trimmed().isEmpty())
-                d.label = QStringLiteral("虚拟屏%1").arg(i + 1);
-        } else {
-            d.width = virtuals[i].geometry.width();
-            d.height = virtuals[i].geometry.height();
-            d.hz = 60;
-            d.scale = 100;
-        }
-        tmp.displays.push_back(d);
-    }
-    // 最后一块强制用用户 spec
-    if (!tmp.displays.isEmpty())
-        tmp.displays.last() = spec;
+    if (virtuals.isEmpty())
+        return QStringLiteral("已添加，但桌面尚未枚举到虚拟屏（可点刷新）。");
 
-    const QString msg = arrangeAndDpi(tmp);
-    if (msg.contains(QStringLiteral("失败")) || msg.contains(QStringLiteral("只看到")))
-        return msg;
+    const MonitorInfo &mon = virtuals.last();
+    MonitorInfo primary;
+    for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+        if (m.primary) {
+            primary = m;
+            break;
+        }
+    }
+    const int x = primary.deviceName.isEmpty() ? mon.geometry.x() : primary.geometry.right();
+    const int y = primary.deviceName.isEmpty() ? mon.geometry.y() : primary.geometry.top();
+    // 模式设置失败也不回滚加屏——驱动默认模式仍可用（与官方体验一致）
+    if (!WinDisplay::setMode(mon.deviceName, spec.width, spec.height, spec.hz, x, y)) {
+        WinDisplay::applyDisplayChanges();
+        return QStringLiteral("已添加「%1」（默认模式；%2×%3 可能需在右键改，或管理员写自定义模式）")
+            .arg(spec.label)
+            .arg(spec.width)
+            .arg(spec.height);
+    }
+    WinDisplay::applyDisplayChanges();
+    QThread::msleep(250);
+    WinDisplay::setDpiScale(mon.deviceName, spec.scale); // 失败忽略
     return QStringLiteral("已添加「%1」%2×%3。").arg(spec.label).arg(spec.width).arg(spec.height);
 }
 
@@ -397,14 +395,6 @@ QString VddService::updateAt(int index, const DisplaySpec &spec, const QVector<D
     if (!ensureParsecOpen(&err))
         return err;
 
-    QVector<DisplaySpec> modes = allDisplays;
-    if (index < modes.size())
-        modes[index] = spec;
-    else
-        modes.push_back(spec);
-    if (!writeParsecCustomModes(modes, &err))
-        return err;
-
     QVector<MonitorInfo> virtuals = currentVirtuals();
     if (index >= virtuals.size())
         virtuals = waitVirtuals(index + 1);
@@ -413,12 +403,37 @@ QString VddService::updateAt(int index, const DisplaySpec &spec, const QVector<D
 
     const MonitorInfo &mon = virtuals[index];
     if (!WinDisplay::setMode(mon.deviceName, spec.width, spec.height, spec.hz,
-                             mon.geometry.x(), mon.geometry.y()))
-        return QStringLiteral("设置分辨率失败。");
+                             mon.geometry.x(), mon.geometry.y())) {
+        // 驱动模式表没有该分辨率时，才尝试写自定义（要管理员）
+        QVector<DisplaySpec> modes = allDisplays;
+        if (index < modes.size())
+            modes[index] = spec;
+        else
+            modes.push_back(spec);
+        QString regErr;
+        if (!writeParsecCustomModes(modes, &regErr)) {
+            return QStringLiteral("设置分辨率失败（%1×%2 @%3）。\n"
+                                  "该模式可能不在驱动表中；写自定义模式需要管理员：%4")
+                .arg(spec.width)
+                .arg(spec.height)
+                .arg(spec.hz)
+                .arg(regErr);
+        }
+        // 自定义模式通常需重新插拔才进表；先再试一次 setMode
+        if (!WinDisplay::setMode(mon.deviceName, spec.width, spec.height, spec.hz,
+                                 mon.geometry.x(), mon.geometry.y())) {
+            return QStringLiteral("已写入自定义模式，但尚未生效。\n"
+                                  "请删除该虚拟屏再添加一次，或重启本程序后重试。");
+        }
+    }
     WinDisplay::applyDisplayChanges();
-    QThread::msleep(300);
-    if (!WinDisplay::setDpiScale(mon.deviceName, spec.scale))
-        return QStringLiteral("已改分辨率，但缩放设置失败（可到系统显示设置手动调）。");
+    QThread::msleep(250);
+    if (!WinDisplay::setDpiScale(mon.deviceName, spec.scale)) {
+        return QStringLiteral("已更新为 %1×%2 @%3Hz；缩放未改成（可到系统显示设置手动调）。")
+            .arg(spec.width)
+            .arg(spec.height)
+            .arg(spec.hz);
+    }
     return QStringLiteral("已更新为 %1×%2 @%3Hz 缩放%4%。")
         .arg(spec.width)
         .arg(spec.height)

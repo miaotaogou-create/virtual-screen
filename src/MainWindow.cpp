@@ -153,11 +153,8 @@ MainWindow::MainWindow(QWidget *parent)
         m_cfg = c;
         persistCfg();
         rebuildTabs();
-        m_title->setStatusHint(QStringLiteral("方案已写入 · 点「添加显示」或加载后应用"));
-        if (QMessageBox::question(this, QStringLiteral("应用方案"),
-                                  QStringLiteral("配置已保存。是否立即按方案重建虚拟屏？"))
-            == QMessageBox::Yes)
-            onApply();
+        m_title->setStatusHint(QStringLiteral("方案已保存 · 正在应用…"));
+        onApply();
     });
     connect(m_settings, &SettingsDialog::saveAsRequested, this, &MainWindow::onSaveProfileAs);
     connect(m_settings, &SettingsDialog::loadProfileRequested, this, &MainWindow::onLoadProfile);
@@ -598,10 +595,6 @@ void MainWindow::showDisplayContextMenu(int index, const QPoint &globalPos)
     });
     menu.addSeparator();
     connect(menu.addAction(QStringLiteral("删除此虚拟屏")), &QAction::triggered, this, [this, index]() {
-        if (QMessageBox::question(this, QStringLiteral("删除"),
-                                  QStringLiteral("删除「%1」？").arg(m_cfg.displays[index].label))
-            != QMessageBox::Yes)
-            return;
         removeDisplayAt(index);
     });
 
@@ -711,13 +704,8 @@ void MainWindow::onLoadProfile(const QString &path)
     m_cfg = c;
     persistCfg();
     rebuildTabs();
-    m_title->setStatusHint(QStringLiteral("已加载「%1」").arg(m_cfg.profileName));
-    if (QMessageBox::question(this, QStringLiteral("应用方案"),
-                              QStringLiteral("是否立即按「%1」重建虚拟屏？").arg(m_cfg.profileName))
-        == QMessageBox::Yes)
-        onApply();
-    else
-        refreshGuide();
+    m_title->setStatusHint(QStringLiteral("已加载「%1」· 正在应用…").arg(m_cfg.profileName));
+    onApply();
 }
 
 void MainWindow::onDeleteProfile(const QString &path)
@@ -778,42 +766,15 @@ void MainWindow::addDisplaySpec(const DisplaySpec &spec)
     if (s.label.trimmed().isEmpty())
         s.label = QStringLiteral("虚拟屏%1").arg(m_cfg.displays.size() + 1);
 
-    if (!Elevate::isAdmin()) {
-        m_cfg.displays.push_back(s);
-        persistCfg();
-        ensureAdminFor(QStringLiteral("添加显示"), {QStringLiteral("--apply")});
-        return;
-    }
-
     m_pendingSpec = s;
     m_pendingIndex = m_cfg.displays.size();
     runBg([this, s]() { return m_vdd->addOne(s); }, QStringLiteral("添加"));
-}
-
-bool MainWindow::ensureAdminFor(const QString &action, const QStringList &args)
-{
-    if (Elevate::isAdmin())
-        return true;
-    if (!confirmElevate(action))
-        return false;
-    persistCfg();
-    if (!Elevate::relaunchAsAdmin(args))
-        QMessageBox::warning(this, QStringLiteral("提权"), QStringLiteral("无法弹出 UAC，或已取消。"));
-    else
-        close();
-    return false;
 }
 
 void MainWindow::removeDisplayAt(int index)
 {
     if (index < 0 || index >= m_cfg.displays.size())
         return;
-    if (!Elevate::isAdmin()) {
-        m_cfg.displays.removeAt(index);
-        persistCfg();
-        ensureAdminFor(QStringLiteral("删除虚拟屏"), {QStringLiteral("--apply")});
-        return;
-    }
     m_pendingIndex = index;
     const int tracked = m_vdd->trackedCount();
     runBg([this, index, tracked]() {
@@ -827,12 +788,6 @@ void MainWindow::updateDisplayAt(int index, const DisplaySpec &spec)
 {
     if (index < 0 || index >= m_cfg.displays.size())
         return;
-    if (!Elevate::isAdmin()) {
-        m_cfg.displays[index] = spec;
-        persistCfg();
-        ensureAdminFor(QStringLiteral("修改虚拟屏"), {QStringLiteral("--apply")});
-        return;
-    }
     m_pendingSpec = spec;
     m_pendingIndex = index;
     QVector<DisplaySpec> all = m_cfg.displays;
@@ -910,16 +865,16 @@ bool MainWindow::confirmElevate(const QString &action)
 
 static bool looksSuccess(const QString &title, const QString &msg)
 {
-    if (title == QStringLiteral("应用") || title == QStringLiteral("添加")
-        || title == QStringLiteral("更新") || title == QStringLiteral("删除"))
-        return msg.startsWith(QStringLiteral("已应用"))
-            || msg.startsWith(QStringLiteral("已更新"))
-            || msg.startsWith(QStringLiteral("已添加"))
-            || msg.startsWith(QStringLiteral("已删除"));
-    if (title == QStringLiteral("清除"))
-        return msg.startsWith(QStringLiteral("已请求禁用"))
-            || msg.contains(QStringLiteral("未找到 Parsec"))
-            || msg.contains(QStringLiteral("无需清除"));
+    Q_UNUSED(title);
+    if (msg.startsWith(QStringLiteral("已应用"))
+        || msg.startsWith(QStringLiteral("已更新"))
+        || msg.startsWith(QStringLiteral("已添加"))
+        || msg.startsWith(QStringLiteral("已删除"))
+        || msg.startsWith(QStringLiteral("已就绪"))
+        || msg.startsWith(QStringLiteral("已请求禁用"))
+        || msg.contains(QStringLiteral("未找到 Parsec"))
+        || msg.contains(QStringLiteral("无需清除")))
+        return true;
     return !msg.contains(QStringLiteral("失败"));
 }
 
@@ -1022,16 +977,6 @@ void MainWindow::onApply()
         return;
     }
     persistCfg();
-    if (!Elevate::isAdmin()) {
-        if (!confirmElevate(QStringLiteral("应用")))
-            return;
-        if (!Elevate::relaunchAsAdmin({QStringLiteral("--apply")}))
-            QMessageBox::warning(this, QStringLiteral("提权"), QStringLiteral("无法弹出 UAC，或已取消。"));
-        else
-            close();
-        return;
-    }
-
     const AppConfig c = m_cfg;
     runBg([this, c]() { return m_vdd->applyConfig(c); }, QStringLiteral("应用"));
 }
@@ -1042,15 +987,6 @@ void MainWindow::onClear()
                               QStringLiteral("移除所有虚拟屏？"))
         != QMessageBox::Yes)
         return;
-    if (!Elevate::isAdmin()) {
-        if (!confirmElevate(QStringLiteral("清除")))
-            return;
-        if (!Elevate::relaunchAsAdmin({QStringLiteral("--clear")}))
-            QMessageBox::warning(this, QStringLiteral("提权"), QStringLiteral("无法弹出 UAC，或已取消。"));
-        else
-            close();
-        return;
-    }
     runBg([this]() { return m_vdd->clearVirtualDisplays(); }, QStringLiteral("清除"));
 }
 
