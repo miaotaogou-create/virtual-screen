@@ -11,6 +11,7 @@
 #include <QThread>
 #include <QTextStream>
 #include <algorithm>
+#include <vector>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -20,12 +21,46 @@
 
 namespace {
 
-QByteArray makeVddXml(const QVector<DisplaySpec> &displays)
+QString preferGpuFriendlyName()
+{
+    // 独显优先；笔记本上 VDD 绑核显时 swapchain 更容易挂
+    QString nvidia;
+    QString any;
+    for (DWORD i = 0;; ++i) {
+        DISPLAY_DEVICEW adapter{};
+        adapter.cb = sizeof(adapter);
+        if (!EnumDisplayDevicesW(nullptr, i, &adapter, 0))
+            break;
+        const QString name = QString::fromWCharArray(adapter.DeviceString);
+        if (name.isEmpty())
+            continue;
+        if (name.contains(QStringLiteral("Microsoft Basic Render"), Qt::CaseInsensitive))
+            continue;
+        if (name.contains(QStringLiteral("Virtual Display"), Qt::CaseInsensitive))
+            continue;
+        if (any.isEmpty())
+            any = name;
+        if (name.contains(QStringLiteral("NVIDIA"), Qt::CaseInsensitive)
+            || name.contains(QStringLiteral("GeForce"), Qt::CaseInsensitive)
+            || name.contains(QStringLiteral("Radeon"), Qt::CaseInsensitive)) {
+            nvidia = name;
+            break;
+        }
+    }
+    if (!nvidia.isEmpty())
+        return nvidia;
+    if (!any.isEmpty())
+        return any;
+    return QStringLiteral("default");
+}
+
+QByteArray makeVddXml(const QVector<DisplaySpec> &displays, const QString &gpuName)
 {
     QString xml;
     QTextStream ts(&xml);
     ts << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
     ts << "<vdd_settings>\n  <monitors>\n    <count>" << displays.size() << "</count>\n  </monitors>\n";
+    ts << "  <gpu>\n    <friendlyname>" << gpuName << "</friendlyname>\n  </gpu>\n";
     ts << "  <global>\n";
     QList<int> hzList;
     for (const DisplaySpec &d : displays) {
@@ -48,12 +83,13 @@ QByteArray makeVddXml(const QVector<DisplaySpec> &displays)
            << "      <refresh_rate>" << d.hz << "</refresh_rate>\n"
            << "    </resolution>\n";
     }
+    // HardwareCursor 在部分独显笔记本上会触发 swapchain 失败，先关
     ts << "  </resolutions>\n"
        << "  <options>\n"
        << "    <CustomEdid>false</CustomEdid>\n"
        << "    <PreventSpoof>true</PreventSpoof>\n"
-       << "    <HardwareCursor>true</HardwareCursor>\n"
-       << "    <logging>false</logging>\n"
+       << "    <HardwareCursor>false</HardwareCursor>\n"
+       << "    <logging>true</logging>\n"
        << "  </options>\n"
        << "</vdd_settings>\n";
     return xml.toUtf8();
@@ -65,7 +101,6 @@ QString runHidden(const QString &program, const QStringList &args, int *exitCode
     p.setProgram(program);
     p.setArguments(args);
     p.setProcessChannelMode(QProcess::MergedChannels);
-    // 隐藏控制台
     p.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *cpa) {
         cpa->flags |= CREATE_NO_WINDOW;
     });
@@ -84,7 +119,6 @@ QStringList findVddInstanceIds()
 {
     QStringList ids;
 
-    // 1) pnputil：中文系统字段是「实例 ID:」；编码偶发乱码时下面有兜底
     {
         int code = 0;
         const QString out = runHidden(QStringLiteral("pnputil"),
@@ -107,7 +141,6 @@ QStringList findVddInstanceIds()
         };
         auto flush = [&]() {
             const QString blob = (curDesc + QLatin1Char(' ') + curId).toLower();
-            // 只认描述里的 VDD 特征，不用裸 ROOT\DISPLAY 以免误伤其它设备
             const bool byName = blob.contains(QStringLiteral("virtual display"))
                 || blob.contains(QStringLiteral("mttvdd"))
                 || blob.contains(QStringLiteral("iddsample"))
@@ -125,7 +158,6 @@ QStringList findVddInstanceIds()
                 continue;
             if (isIdLine(line)) {
                 flush();
-                // 兼容半角/全角冒号
                 int colon = line.indexOf(QLatin1Char(':'));
                 if (colon < 0)
                     colon = line.indexOf(QChar(0xFF1A));
@@ -140,7 +172,6 @@ QStringList findVddInstanceIds()
         flush();
     }
 
-    // 2) PowerShell 兜底：不依赖 pnputil 本地化文案
     if (ids.isEmpty()) {
         int code = 0;
         const QString out = runHidden(
@@ -170,7 +201,6 @@ bool pnpSetEnabled(const QString &instanceId, bool enabled)
     if (code == 0)
         return true;
 
-    // 管理员下 pnputil 偶发失败时，用 PowerShell 再试一次
     const QString cmd = enabled
         ? QStringLiteral("Enable-PnpDevice -InstanceId '%1' -Confirm:$false").arg(instanceId)
         : QStringLiteral("Disable-PnpDevice -InstanceId '%1' -Confirm:$false").arg(instanceId);
@@ -179,6 +209,140 @@ bool pnpSetEnabled(const QString &instanceId, bool enabled)
               {QStringLiteral("-NoProfile"), QStringLiteral("-Command"), cmd},
               &psCode);
     return psCode == 0;
+}
+
+bool pnpRestart(const QString &instanceId)
+{
+    int code = 0;
+    runHidden(QStringLiteral("pnputil"),
+              {QStringLiteral("/restart-device"), instanceId},
+              &code);
+    if (code == 0)
+        return true;
+    // 旧系统无 /restart-device：禁用再启用
+    if (!pnpSetEnabled(instanceId, false))
+        return false;
+    QThread::msleep(400);
+    return pnpSetEnabled(instanceId, true);
+}
+
+/** 官方控制通路：\\\\.\\pipe\\MTTVirtualDisplayPipe，命令 UTF-16LE。 */
+QString pipeCommand(const QString &cmd, int waitMs = 2500)
+{
+    const wchar_t *pipeName = L"\\\\.\\pipe\\MTTVirtualDisplayPipe";
+    if (!WaitNamedPipeW(pipeName, 3000)) {
+        const DWORD e = GetLastError();
+        if (e != ERROR_SEM_TIMEOUT && e != ERROR_FILE_NOT_FOUND)
+            return QStringLiteral("PIPE_WAIT_FAIL %1").arg(e);
+    }
+    HANDLE h = CreateFileW(pipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE)
+        return QStringLiteral("PIPE_OPEN_FAIL %1").arg(GetLastError());
+
+    const std::wstring w = cmd.toStdWString();
+    DWORD written = 0;
+    const BOOL okWrite = WriteFile(h, w.data(), DWORD(w.size() * sizeof(wchar_t)), &written, nullptr);
+    if (!okWrite) {
+        const DWORD e = GetLastError();
+        CloseHandle(h);
+        return QStringLiteral("PIPE_WRITE_FAIL %1").arg(e);
+    }
+
+    QByteArray out;
+    const DWORD start = GetTickCount();
+    char buf[2048];
+    while (int(GetTickCount() - start) < waitMs) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr))
+            break;
+        if (avail == 0) {
+            if (!out.isEmpty() && int(GetTickCount() - start) > 600)
+                break;
+            Sleep(40);
+            continue;
+        }
+        DWORD n = 0;
+        if (!ReadFile(h, buf, qMin<DWORD>(avail, sizeof(buf)), &n, nullptr) || n == 0)
+            break;
+        out.append(buf, int(n));
+    }
+    CloseHandle(h);
+    return QString::fromUtf8(out);
+}
+
+bool pipeAlive()
+{
+    const wchar_t *pipeName = L"\\\\.\\pipe\\MTTVirtualDisplayPipe";
+    // 管道存在即可；PING 有的版本无正文，不能靠回包判断
+    if (WaitNamedPipeW(pipeName, 500))
+        return true;
+    const DWORD e = GetLastError();
+    return e == ERROR_PIPE_BUSY || e == ERROR_SEM_TIMEOUT;
+}
+
+int countDesktopVirtuals()
+{
+    int n = 0;
+    for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+        if (m.likelyVirtual)
+            ++n;
+    }
+    return n;
+}
+
+int countPhantomVirtualAdapters()
+{
+    // EnumDisplayMonitors 看不到、但适配器列表里有的 VDD 目标
+    int n = 0;
+    for (DWORD i = 0;; ++i) {
+        DISPLAY_DEVICEW adapter{};
+        adapter.cb = sizeof(adapter);
+        if (!EnumDisplayDevicesW(nullptr, i, &adapter, 0))
+            break;
+        const QString name = QString::fromWCharArray(adapter.DeviceString);
+        if (!name.contains(QStringLiteral("Virtual Display"), Qt::CaseInsensitive)
+            && !name.contains(QStringLiteral("MttVDD"), Qt::CaseInsensitive))
+            continue;
+        if (!(adapter.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            ++n;
+    }
+    return n;
+}
+
+QVector<MonitorInfo> waitDesktopVirtuals(int want, int rounds = 40)
+{
+    QVector<MonitorInfo> virtuals;
+    for (int i = 0; i < rounds; ++i) {
+        virtuals.clear();
+        for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+            if (m.likelyVirtual)
+                virtuals.push_back(m);
+        }
+        if (virtuals.size() >= want)
+            break;
+        QThread::msleep(200);
+    }
+    if (virtuals.size() > want)
+        virtuals = virtuals.mid(0, want);
+    return virtuals;
+}
+
+QString diagnoseMissingVirtuals(int got, int want)
+{
+    const int phantoms = countPhantomVirtualAdapters();
+    QString msg = QStringLiteral("已写入配置，但桌面只挂上 %1 块虚拟屏（期望 %2）。").arg(got).arg(want);
+    if (phantoms > 0) {
+        msg += QStringLiteral(
+            "\n驱动侧还能看到 %1 个未挂桌面的 Virtual Display 适配器（常见于 swapchain 失败）。"
+            "\n请：①关掉 Virtual Driver Control（官方配套）避免抢配置；"
+            "②设备管理器里对「Virtual Display Driver」禁用再启用，或重启电脑；"
+            "③查看 C:\\VirtualDisplayDriver\\Logs 是否有 Failed to set device to swap chain。")
+                   .arg(phantoms);
+    } else {
+        msg += QStringLiteral("\n若刚改过 GPU/屏数，请再点一次「应用」；仍不行请重启 Virtual Display Driver 设备。");
+    }
+    return msg;
 }
 
 } // namespace
@@ -205,37 +369,40 @@ QString VddService::installDriverHint() const
         "未检测到 Virtual Display Driver。请先安装驱动：\n"
         "1) 官方：https://github.com/VirtualDrivers/Virtual-Display-Driver/releases\n"
         "2) 或管理员运行仓库 scripts\\install_vdd.ps1\n"
-        "装好后通常出现 C:\\VirtualDisplayDriver，再点「应用」。");
+        "装好后通常出现 C:\\VirtualDisplayDriver，再点「应用」。\n"
+        "请先关掉官方 Virtual Driver Control，避免与本程序抢配置。");
 }
 
 QString VddService::clearVirtualDisplays()
 {
-    // 先把监视器数量写成 0，避免下次启用又冒出旧屏
     {
         AppConfig empty = AppConfig::defaults();
         empty.displays.clear();
         QFile f(empty.vddSettingsPath);
         QDir().mkpath(QFileInfo(empty.vddSettingsPath).absolutePath());
         if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            // makeVddXml 要求至少有一块时才有意义；这里手写 count=0
             f.write("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                     "<vdd_settings>\n  <monitors>\n    <count>0</count>\n  </monitors>\n"
+                    "  <gpu>\n    <friendlyname>default</friendlyname>\n  </gpu>\n"
                     "  <global/>\n  <resolutions/>\n  <options>\n"
                     "    <CustomEdid>false</CustomEdid>\n"
                     "    <PreventSpoof>true</PreventSpoof>\n"
-                    "    <HardwareCursor>true</HardwareCursor>\n"
+                    "    <HardwareCursor>false</HardwareCursor>\n"
                     "    <logging>false</logging>\n"
                     "  </options>\n</vdd_settings>\n");
         }
     }
 
+    // 优先走官方管道把屏数打到 0（会内部 reload）
+    if (pipeAlive()) {
+        emit progress(QStringLiteral("经驱动管道清除虚拟屏…"));
+        pipeCommand(QStringLiteral("SETDISPLAYCOUNT 0"), 2000);
+        QThread::msleep(1200);
+    }
+
     const QStringList ids = findVddInstanceIds();
     if (ids.isEmpty()) {
-        int left = 0;
-        for (const auto &m : WinDisplay::listMonitors()) {
-            if (m.likelyVirtual)
-                ++left;
-        }
+        int left = countDesktopVirtuals();
         if (left > 0)
             return QStringLiteral("仍检测到 %1 块虚拟屏，但找不到驱动设备实例（清除失败）。").arg(left);
         return QStringLiteral("未找到虚拟显示驱动设备（可能已清除）。");
@@ -252,11 +419,7 @@ QString VddService::clearVirtualDisplays()
     }
 
     QThread::msleep(800);
-    int left = 0;
-    for (const auto &m : WinDisplay::listMonitors()) {
-        if (m.likelyVirtual)
-            ++left;
-    }
+    const int left = countDesktopVirtuals();
 
     QString msg = QStringLiteral("已请求禁用 %1 个虚拟显示设备。").arg(n);
     if (!failed.isEmpty())
@@ -271,56 +434,61 @@ QString VddService::clearVirtualDisplays()
 QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
 {
     Q_UNUSED(detail);
-    emit progress(QStringLiteral("写入驱动配置…"));
+    const QString gpu = preferGpuFriendlyName();
+    emit progress(QStringLiteral("写入驱动配置（GPU: %1）…").arg(gpu));
     QFile f(cfg.vddSettingsPath);
     QDir().mkpath(QFileInfo(cfg.vddSettingsPath).absolutePath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return QStringLiteral("无法写入 %1").arg(cfg.vddSettingsPath);
-    f.write(makeVddXml(cfg.displays));
+    f.write(makeVddXml(cfg.displays, gpu));
     f.close();
 
-    auto existing = WinDisplay::listMonitors();
     QVector<MonitorInfo> virtuals;
-    for (const auto &m : existing) {
+    for (const auto &m : WinDisplay::listMonitors()) {
         if (m.likelyVirtual)
             virtuals.push_back(m);
     }
 
-    int nDev = 0;
-    // 数量变了必须重启，否则多出来的屏会残留、少了则起不来
-    if (virtuals.size() == cfg.displays.size()) {
-        emit progress(QStringLiteral("虚拟屏已在线，跳过驱动重启…"));
-    } else {
-        emit progress(QStringLiteral("重启虚拟显示驱动…"));
-        const QStringList ids = findVddInstanceIds();
-        if (ids.isEmpty())
-            return QStringLiteral("未检测到 Virtual Display Driver。请先安装驱动。");
-        for (const QString &id : ids) {
-            pnpSetEnabled(id, false);
-            QThread::msleep(250);
-            pnpSetEnabled(id, true);
-            ++nDev;
-        }
-        QThread::msleep(600);
-        emit progress(QStringLiteral("等待虚拟屏出现…"));
-        for (int i = 0; i < 40; ++i) {
-            virtuals.clear();
-            for (const auto &m : WinDisplay::listMonitors()) {
-                if (m.likelyVirtual)
-                    virtuals.push_back(m);
-            }
-            if (virtuals.size() >= cfg.displays.size())
-                break;
+    bool reloaded = false;
+    // 官方推荐：SETDISPLAYCOUNT 会写 XML count 并 reload；比盲 pnputil 稳
+    if (pipeAlive()) {
+        emit progress(QStringLiteral("经驱动管道设置 GPU…"));
+        const QString setGpuCmd = QStringLiteral("SETGPU \"%1\"").arg(gpu);
+        pipeCommand(setGpuCmd, 2000);
+        QThread::msleep(1500); // SETGPU 会重启驱动，管道会短暂不可用
+        emit progress(QStringLiteral("经驱动管道设置屏数 %1…").arg(cfg.displays.size()));
+        // 等管道恢复
+        for (int i = 0; i < 20 && !pipeAlive(); ++i)
             QThread::msleep(200);
-        }
-        virtuals = virtuals.mid(0, cfg.displays.size());
+        pipeCommand(QStringLiteral("SETDISPLAYCOUNT %1").arg(cfg.displays.size()), 2000);
+        reloaded = true;
+        QThread::msleep(800);
+        emit progress(QStringLiteral("等待虚拟屏挂到桌面…"));
+        virtuals = waitDesktopVirtuals(cfg.displays.size());
     }
 
     if (virtuals.size() < cfg.displays.size()) {
-        return QStringLiteral("已写入配置，但只看到 %1 块虚拟屏（期望 %2）。")
-            .arg(virtuals.size())
-            .arg(cfg.displays.size());
+        emit progress(QStringLiteral("管道未就绪或屏未挂上，改用设备重启…"));
+        const QStringList ids = findVddInstanceIds();
+        if (ids.isEmpty())
+            return QStringLiteral("未检测到 Virtual Display Driver。请先安装驱动。");
+        int ok = 0;
+        for (const QString &id : ids) {
+            if (pnpRestart(id))
+                ++ok;
+        }
+        if (ok == 0)
+            return QStringLiteral("无法重启虚拟显示驱动设备（需要管理员权限，或设备正忙）。\n"
+                                  "请关掉 Virtual Driver Control 后，在设备管理器手动禁用/启用「Virtual Display Driver」。");
+        reloaded = true;
+        emit progress(QStringLiteral("等待虚拟屏挂到桌面…"));
+        virtuals = waitDesktopVirtuals(cfg.displays.size());
+    } else if (!reloaded && virtuals.size() == cfg.displays.size()) {
+        emit progress(QStringLiteral("虚拟屏已在桌面，跳过驱动重启…"));
     }
+
+    if (virtuals.size() < cfg.displays.size())
+        return diagnoseMissingVirtuals(virtuals.size(), cfg.displays.size());
 
     emit progress(QStringLiteral("设置分辨率与排列…"));
     MonitorInfo primary;
@@ -347,10 +515,9 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
     WinDisplay::applyDisplayChanges();
 
     emit progress(QStringLiteral("设置显示缩放…"));
-    QThread::msleep(400); // 等模式落定后再改 DPI，成功率更高
+    QThread::msleep(400);
     int dpiOk = 0;
     int dpiFail = 0;
-    // 重新枚举，按当前几何匹配刚设好的虚拟屏
     QVector<MonitorInfo> after;
     for (const MonitorInfo &m : WinDisplay::listMonitors()) {
         if (m.likelyVirtual)
@@ -376,11 +543,9 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
             ++dpiFail;
     }
 
-    QString msg;
-    if (nDev > 0)
-        msg = QStringLiteral("已应用 %1 块虚拟屏（驱动设备 %2）").arg(cfg.displays.size()).arg(nDev);
-    else
-        msg = QStringLiteral("已更新 %1 块虚拟屏分辨率/位置").arg(cfg.displays.size());
+    QString msg = QStringLiteral("已应用 %1 块虚拟屏（GPU %2）")
+                      .arg(cfg.displays.size())
+                      .arg(gpu);
     if (dpiOk > 0)
         msg += QStringLiteral("，缩放成功 %1").arg(dpiOk);
     if (dpiFail > 0)
