@@ -91,10 +91,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_tabLay->setContentsMargins(10, 4, 10, 4);
     m_tabLay->setSpacing(6);
     m_tabLay->addStretch();
-    m_previewToggle = new QPushButton(QStringLiteral("预览:关"), m_tabBar);
-    m_previewToggle->setCursor(Qt::PointingHandCursor);
-    m_previewToggle->setStyleSheet(btnStyle(false));
-    m_tabLay->addWidget(m_previewToggle);
     root->addWidget(m_tabBar);
 
     m_preview = new PreviewPane(this);
@@ -136,14 +132,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_title, &TitleBar::clearClicked, this, &MainWindow::onClear);
     connect(m_title, &TitleBar::closeClicked, this, &QWidget::close);
-    connect(m_previewToggle, &QPushButton::clicked, this, &MainWindow::togglePreview);
     connect(profileBtn, &QPushButton::clicked, this, &MainWindow::showProfileMenu);
     connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshDisplays);
     connect(placeBtn, &QPushButton::clicked, this, &MainWindow::onPlaceWindow);
     connect(customBtn, &QPushButton::clicked, this, &MainWindow::onCustomDialog);
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::onAddDisplay);
-    connect(m_preview, &PreviewPane::primaryClicked, this, &MainWindow::onGuidePrimary);
-    connect(m_preview, &PreviewPane::secondaryClicked, this, &MainWindow::onGuideSecondary);
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
     });
@@ -175,13 +168,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     rebuildTabs();
     if (m_vdd->driverReady()) {
-        m_title->setStatusHint(m_cfg.displays.isEmpty()
-                                   ? QStringLiteral("驱动就绪 · 点「添加显示」")
-                                   : QStringLiteral("驱动就绪 · 点「添加显示」或从「方案…」加载"));
+        m_title->setStatusHint(QStringLiteral("驱动就绪 · 点「添加显示」或「方案…」"));
+        m_preview->setPlaceholder(QStringLiteral("点「添加显示」或从「方案…」加载"));
     } else {
         updateDriverUi();
+        m_preview->setPlaceholder(QStringLiteral("未检测到驱动 · 点「添加显示」可安装"));
     }
-    refreshGuide();
 }
 
 void MainWindow::changeEvent(QEvent *e)
@@ -273,28 +265,9 @@ void MainWindow::updateDriverUi()
     m_settings->setDriverHint(m_vdd->installDriverHint());
 }
 
-void MainWindow::setPreviewEnabled(bool on)
-{
-    if (m_previewOn == on) {
-        if (on)
-            refreshPreview();
-        else
-            refreshGuide();
-        return;
-    }
-    m_previewOn = on;
-    m_previewToggle->setText(m_previewOn ? QStringLiteral("预览:开") : QStringLiteral("预览:关"));
-    m_previewToggle->setStyleSheet(m_previewOn ? btnStyle(true) : btnStyle(false));
-    if (m_previewOn)
-        refreshPreview();
-    else
-        refreshGuide();
-}
-
 void MainWindow::setBusyUi(bool busy)
 {
     m_title->setBusy(busy);
-    m_previewToggle->setEnabled(!busy);
     m_bottom->setEnabled(!busy);
     for (QPushButton *b : m_tabs)
         b->setEnabled(!busy);
@@ -356,7 +329,7 @@ void MainWindow::onInstallDriver()
         m_title->setStatusHint(QStringLiteral("驱动安装完成"));
         QMessageBox::information(this, QStringLiteral("安装完成"),
                                  QStringLiteral("已检测到 Parsec Virtual Display Adapter。\n可以点「添加显示」了。"));
-        refreshGuide();
+        m_preview->setPlaceholder(QStringLiteral("点「添加显示」或从「方案…」加载"));
     } else {
         m_title->setStatusHint(QStringLiteral("安装结束，未检测到驱动"));
         QMessageBox::warning(
@@ -366,107 +339,8 @@ void MainWindow::onInstallDriver()
                            "请打开设备管理器查看，或手动再跑一次：\n%2")
                 .arg(code)
                 .arg(setup));
-        refreshGuide();
+        m_preview->setPlaceholder(QStringLiteral("未检测到驱动"));
     }
-}
-
-void MainWindow::refreshGuide()
-{
-    if (m_previewOn || m_busy)
-        return;
-
-    if (!m_vdd->driverReady()) {
-        const QString setup = bundledDriverInstaller();
-        m_preview->setGuide(
-            QStringLiteral("还差一步：安装 Parsec 虚拟显示驱动"),
-            setup.isEmpty()
-                ? QStringLiteral(
-                      "1. 点下方打开下载页，安装 Parsec VDD\n"
-                      "2. 装好后设备里应出现 Parsec Virtual Display Adapter\n"
-                      "3. 回到本程序，点「添加显示」")
-                : QStringLiteral(
-                      "本程序已捆绑驱动安装包。\n"
-                      "1. 点下方「安装捆绑驱动」（会弹 UAC）\n"
-                      "2. 装好后点「添加显示」\n"
-                      "（建议不要同时开官方 ParsecVDisplay）"),
-            setup.isEmpty() ? QStringLiteral("打开驱动下载页") : QStringLiteral("安装捆绑驱动"),
-            QStringLiteral("查看安装说明"));
-        return;
-    }
-
-    if (m_vdd->trackedCount() == 0) {
-        if (!m_cfg.displays.isEmpty()) {
-            m_preview->setGuide(
-                QStringLiteral("方案已加载，尚未挂上虚拟屏"),
-                QStringLiteral(
-                    "当前方案「%1」含 %2 块屏。\n"
-                    "点下方应用即可按方案创建；也可清空后逐个「添加显示」。\n"
-                    "挂上后右键标签可改分辨率 / 刷新率 / 缩放 / 删除。")
-                    .arg(m_cfg.profileName.isEmpty() ? QStringLiteral("当前") : m_cfg.profileName)
-                    .arg(m_cfg.displays.size()),
-                QStringLiteral("应用方案"),
-                QStringLiteral("添加显示"));
-            return;
-        }
-        m_preview->setGuide(
-            QStringLiteral("先添加一块虚拟屏！"),
-            QStringLiteral(
-                "1. 点右下角「添加显示」立刻挂上一块虚拟屏\n"
-                "2. 在上方标签右键：改分辨率 / 刷新率 / 缩放 / 删除\n"
-                "3. 可用「方案…」保存、加载、删除配置；「投放窗口」把应用挪到虚拟屏\n"
-                "4. 打开「预览」查看虚拟屏画面"),
-            QStringLiteral("添加显示"),
-            QStringLiteral("打开预览"));
-        return;
-    }
-
-    const DisplaySpec &s = m_cfg.displays[qBound(0, m_tabIndex, m_cfg.displays.size() - 1)];
-    m_preview->setGuide(
-        QStringLiteral("虚拟屏已就绪"),
-        QStringLiteral("当前：%1  %2×%3 @%4Hz  缩放%5%\n"
-                       "右键标签可改规格；点「预览」看画面；「投放窗口」移动应用。")
-            .arg(s.label)
-            .arg(s.width)
-            .arg(s.height)
-            .arg(s.hz)
-            .arg(s.scale),
-        QStringLiteral("打开预览"),
-        QStringLiteral("投放窗口"));
-}
-
-void MainWindow::onGuidePrimary()
-{
-    if (!m_vdd->driverReady()) {
-        if (!bundledDriverInstaller().isEmpty())
-            onInstallDriver();
-        else
-            openDriverPage();
-        return;
-    }
-    if (m_vdd->trackedCount() == 0) {
-        if (!m_cfg.displays.isEmpty())
-            onApply();
-        else
-            onAddDisplay();
-        return;
-    }
-    setPreviewEnabled(true);
-}
-
-void MainWindow::onGuideSecondary()
-{
-    if (!m_vdd->driverReady()) {
-        QMessageBox::information(this, QStringLiteral("安装说明"), m_vdd->installDriverHint());
-        return;
-    }
-    if (m_vdd->trackedCount() == 0) {
-        if (!m_cfg.displays.isEmpty())
-            onAddDisplay();
-        else
-            setPreviewEnabled(true);
-        return;
-    }
-    onPlaceWindow();
 }
 
 void MainWindow::rebuildTabs()
@@ -516,15 +390,7 @@ void MainWindow::selectTab(int index)
 {
     m_tabIndex = index;
     rebuildTabs();
-    if (m_previewOn)
-        refreshPreview();
-    else
-        refreshGuide();
-}
-
-void MainWindow::togglePreview()
-{
-    setPreviewEnabled(!m_previewOn);
+    refreshPreview();
 }
 
 void MainWindow::showDisplayContextMenu(int index, const QPoint &globalPos)
@@ -730,17 +596,13 @@ void MainWindow::onCustomDialog()
     m_settings->loadFrom(m_cfg);
     m_settings->exec();
     rebuildTabs();
-    if (!m_previewOn)
-        refreshGuide();
+    refreshPreview();
 }
 
 void MainWindow::onRefreshDisplays()
 {
     rebuildTabs();
-    if (m_previewOn)
-        refreshPreview();
-    else
-        refreshGuide();
+    refreshPreview();
     m_title->setStatusHint(QStringLiteral("已刷新 · 虚拟屏 %1 / 配置 %2")
                                .arg(m_vdd->trackedCount())
                                .arg(m_cfg.displays.size()));
@@ -754,7 +616,7 @@ void MainWindow::onAddDisplay()
             m_vdd->installDriverHint() + QStringLiteral("\n\n是否安装/打开驱动页？"));
         if (ans == QMessageBox::Yes)
             openDriverPage();
-        refreshGuide();
+        m_preview->setPlaceholder(QStringLiteral("未检测到驱动 · 点「添加显示」可安装"));
         return;
     }
     DisplaySpec spec = defaultSpec(m_cfg.displays.size() + 1);
@@ -846,8 +708,7 @@ void MainWindow::onPlaceWindow()
         return;
     }
     m_title->setStatusHint(QStringLiteral("已投放窗口到「%1」").arg(m_cfg.displays[m_tabIndex].label));
-    if (m_previewOn)
-        QTimer::singleShot(400, this, &MainWindow::refreshPreview);
+    QTimer::singleShot(400, this, &MainWindow::refreshPreview);
 }
 
 bool MainWindow::confirmElevate(const QString &action)
@@ -888,11 +749,7 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
     m_busy = true;
     setBusyUi(true);
     m_title->setStatusHint(title + QStringLiteral("中…"));
-    m_preview->setGuide(
-        title + QStringLiteral("中…"),
-        QStringLiteral("请稍候，正在操作虚拟显示驱动。"),
-        QString(),
-        QString());
+    m_preview->setPlaceholder(title + QStringLiteral("中…"));
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     // 必须在主线程操作：保活 QTimer 不能跨线程 start，否则加屏约 1 秒后被驱动摘掉
@@ -915,9 +772,8 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
     m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0));
     if (!ok) {
         QMessageBox::warning(this, title, msg);
-        setPreviewEnabled(false);
         rebuildTabs();
-        refreshGuide();
+        refreshPreview();
         return;
     }
 
@@ -943,15 +799,7 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
     if (msg.contains(QStringLiteral("警告")) || msg.contains(QStringLiteral("提示：")))
         QMessageBox::information(this, title, msg);
 
-    if (title == QStringLiteral("清除") || m_cfg.displays.isEmpty()) {
-        setPreviewEnabled(false);
-        refreshGuide();
-        return;
-    }
-
-    setPreviewEnabled(true);
-    m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0)
-                           + QStringLiteral(" · 预览已打开"));
+    m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0));
     QTimer::singleShot(500, this, &MainWindow::refreshPreview);
     QTimer::singleShot(1500, this, &MainWindow::refreshPreview);
 }
@@ -969,7 +817,7 @@ void MainWindow::onApply()
             m_vdd->installDriverHint() + QStringLiteral("\n\n是否打开驱动下载页？"));
         if (ans == QMessageBox::Yes)
             openDriverPage();
-        refreshGuide();
+        m_preview->setPlaceholder(QStringLiteral("未检测到驱动"));
         return;
     }
     persistCfg();
@@ -1024,13 +872,11 @@ QVector<MonitorInfo> MainWindow::matchedVirtuals() const
 
 void MainWindow::refreshPreview()
 {
-    if (!m_previewOn)
-        return;
     if (m_grabBusy || isMinimized() || !isVisible() || m_busy)
         return;
 
     if (m_cfg.displays.isEmpty()) {
-        m_preview->setPlaceholder(QStringLiteral("还没有虚拟屏 · 点「添加显示」"));
+        m_preview->setPlaceholder(QStringLiteral("点「添加显示」或从「方案…」加载"));
         return;
     }
     if (m_tabs.size() != m_cfg.displays.size())
@@ -1042,9 +888,7 @@ void MainWindow::refreshPreview()
     const QString label = spec.label;
     if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
         m_preview->setPlaceholder(
-            QStringLiteral("「%1」未出现在系统显示器列表中\n"
-                           "请点「添加显示」或加载方案后应用")
-                .arg(label));
+            QStringLiteral("「%1」未出现在系统显示器列表中").arg(label));
         m_title->setStatusHint(QStringLiteral("%1 · 系统未挂上").arg(label));
         return;
     }
@@ -1068,7 +912,7 @@ void MainWindow::refreshPreview()
         }
         QMetaObject::invokeMethod(this, [this, img, label, tab]() {
             m_grabBusy = false;
-            if (!m_previewOn || tab != m_tabIndex || m_busy)
+            if (tab != m_tabIndex || m_busy)
                 return;
             if (img.isNull())
                 m_preview->setPlaceholder(QStringLiteral("抓屏失败"));
