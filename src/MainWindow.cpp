@@ -471,6 +471,17 @@ bool MainWindow::confirmElevate(const QString &action)
         == QMessageBox::Ok;
 }
 
+static bool looksSuccess(const QString &title, const QString &msg)
+{
+    if (title == QStringLiteral("应用"))
+        return msg.startsWith(QStringLiteral("已应用"))
+            || msg.startsWith(QStringLiteral("已更新"));
+    if (title == QStringLiteral("清除"))
+        return msg.startsWith(QStringLiteral("已请求禁用"))
+            || msg.contains(QStringLiteral("未找到虚拟显示驱动设备"));
+    return !msg.contains(QStringLiteral("失败"));
+}
+
 void MainWindow::runBg(const std::function<QString()> &work, const QString &title)
 {
     if (m_busy) {
@@ -498,6 +509,8 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
             ok = false;
             msg = QStringLiteral("未知错误");
         }
+        if (ok)
+            ok = looksSuccess(title, msg);
         QMetaObject::invokeMethod(this, [this, msg, ok, title]() {
             m_busy = false;
             setBusyUi(false);
@@ -505,7 +518,8 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
             rebuildTabs();
             updateDriverUi();
             if (!ok) {
-                QMessageBox::critical(this, title, msg);
+                QMessageBox::warning(this, title, msg);
+                setPreviewEnabled(false);
                 refreshGuide();
                 return;
             }
@@ -513,9 +527,12 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
                 QMessageBox::warning(this, title, msg);
 
             if (title == QStringLiteral("应用")) {
+                // 系统枚举虚拟屏常有延迟，先开预览再短轮询，避免误报「未上线」
                 setPreviewEnabled(true);
                 m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0)
                                        + QStringLiteral(" · 预览已打开"));
+                QTimer::singleShot(800, this, &MainWindow::refreshPreview);
+                QTimer::singleShot(2000, this, &MainWindow::refreshPreview);
             } else {
                 setPreviewEnabled(false);
                 refreshGuide();
@@ -636,8 +653,13 @@ void MainWindow::refreshPreview()
     const DisplaySpec &spec = m_cfg.displays[m_tabIndex];
     const QString label = spec.label;
     if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
-        m_preview->setPlaceholder(QStringLiteral("「%1」尚未上线\n请先点「应用」创建虚拟屏").arg(label));
-        m_title->setStatusHint(QStringLiteral("%1 · 未上线").arg(label));
+        // 配置可能已写入，但 Windows 桌面尚未挂上该屏（与「没点应用」不是一回事）
+        m_preview->setPlaceholder(
+            QStringLiteral("「%1」未出现在系统显示器列表中\n"
+                           "可再点顶栏「应用」；仍没有则到 Windows「显示设置」看是否多出显示器\n"
+                           "（当前机器上活跃显示器里还没有这块虚拟屏）")
+                .arg(label));
+        m_title->setStatusHint(QStringLiteral("%1 · 系统未挂上").arg(label));
         return;
     }
     const MonitorInfo mon = virtuals[m_tabIndex];
