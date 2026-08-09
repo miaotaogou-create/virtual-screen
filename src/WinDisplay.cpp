@@ -370,16 +370,35 @@ bool moveWindowToMonitor(qulonglong hwndVal, const QRect &monitorGeo)
     HWND hwnd = reinterpret_cast<HWND>(hwndVal);
     if (!hwnd || !IsWindow(hwnd))
         return false;
+
+    // 以目标屏中心找 HMONITOR，再用系统 rcMonitor（避免只靠 QRect 在 DPI 下偏一截）
+    POINT pt{monitorGeo.center().x(), monitorGeo.center().y()};
+    HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(hmon, &mi)) {
+        mi.rcMonitor.left = monitorGeo.x();
+        mi.rcMonitor.top = monitorGeo.y();
+        mi.rcMonitor.right = monitorGeo.x() + monitorGeo.width();
+        mi.rcMonitor.bottom = monitorGeo.y() + monitorGeo.height();
+    }
+
+    const int x = mi.rcMonitor.left;
+    const int y = mi.rcMonitor.top;
+    const int w = mi.rcMonitor.right - mi.rcMonitor.left;
+    const int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    if (w < 32 || h < 32)
+        return false;
+
+    // 先退出最大化/最小化，再整窗贴到目标屏，最后真正最大化
     ShowWindow(hwnd, SW_RESTORE);
-    // 留一点边距，避免贴边被当成最大化异常
-    const int x = monitorGeo.x() + 8;
-    const int y = monitorGeo.y() + 8;
-    const int w = qMax(320, monitorGeo.width() - 16);
-    const int h = qMax(240, monitorGeo.height() - 16);
-    const BOOL ok = SetWindowPos(hwnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW);
-    if (ok)
-        ShowWindow(hwnd, SW_MAXIMIZE);
-    return ok == TRUE;
+    SetWindowPos(hwnd, HWND_TOP, x, y, w, h,
+                 SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOCOPYBITS);
+    // SC_MAXIMIZE 比 ShowWindow(SW_MAXIMIZE) 更贴近标题栏最大化，Qt 窗也吃这套
+    SendMessageW(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    SetForegroundWindow(hwnd);
+    BringWindowToTop(hwnd);
+    return true;
 }
 
 } // namespace WinDisplay
