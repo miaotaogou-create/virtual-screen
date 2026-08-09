@@ -208,6 +208,40 @@ bool applyDisplayChanges()
     return ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr) == DISP_CHANGE_SUCCESSFUL;
 }
 
+bool hasCloneTopology()
+{
+    UINT32 pathCount = 0;
+    UINT32 modeCount = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS)
+        return false;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(),
+                           &modeCount, modes.data(), nullptr) != ERROR_SUCCESS)
+        return false;
+
+    // 同一 adapterId+sourceId 出现多条 path → 复制显示
+    QHash<QString, int> sourceHits;
+    for (UINT32 i = 0; i < pathCount; ++i) {
+        const auto &s = paths[i].sourceInfo;
+        const QString key = QStringLiteral("%1:%2:%3")
+                                .arg(s.adapterId.HighPart)
+                                .arg(s.adapterId.LowPart)
+                                .arg(s.id);
+        if (++sourceHits[key] > 1)
+            return true;
+    }
+    return false;
+}
+
+bool forceExtendTopology()
+{
+    // ponytail: 系统拓扑开关；随后仍须 setMode 排位置，否则只保证「非复制」
+    const LONG rc = SetDisplayConfig(0, nullptr, 0, nullptr,
+                                     SDC_APPLY | SDC_TOPOLOGY_EXTEND);
+    return rc == ERROR_SUCCESS;
+}
+
 bool setDpiScale(const QString &deviceName, int scalePercent)
 {
     // ponytail: DisplayConfig *-3/-4 未公开，但 Win10/11 设置页同路；档位不在表内就近取

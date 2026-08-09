@@ -29,6 +29,8 @@ public:
     QString removeAt(int index);
     /** allDisplays：改模式时一并写入注册表，避免冲掉其它屏的自定义模式。 */
     QString updateAt(int index, const DisplaySpec &spec, const QVector<DisplaySpec> &allDisplays);
+    /** 强制扩展拓扑并重排现有虚拟屏（不重建）。 */
+    QString rearrange(const AppConfig &cfg);
 
     int trackedCount() const { return m_parsecIndices.size(); }
 

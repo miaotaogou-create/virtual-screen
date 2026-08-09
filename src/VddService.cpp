@@ -204,6 +204,14 @@ QString VddService::arrangeAndDpi(const AppConfig &cfg)
     }
 
     emit progress(QStringLiteral("设置分辨率与排列…"));
+    // 驱动刚挂上时 Windows 偶发走「复制」；先强制扩展再排位置
+    WinDisplay::forceExtendTopology();
+    QThread::msleep(200);
+    virtuals = waitVirtuals(want, 20);
+    if (virtuals.size() < want) {
+        return QStringLiteral("强制扩展后虚拟屏数量不足（%1/%2）。").arg(virtuals.size()).arg(want);
+    }
+
     MonitorInfo primary;
     bool hasPrimary = false;
     for (const MonitorInfo &m : WinDisplay::listMonitors()) {
@@ -216,27 +224,50 @@ QString VddService::arrangeAndDpi(const AppConfig &cfg)
     if (!hasPrimary)
         return QStringLiteral("找不到主显示器");
 
-    int x = primary.geometry.right();
-    int y = primary.geometry.top();
-    for (int i = 0; i < want; ++i) {
-        const DisplaySpec &spec = cfg.displays[i];
-        if (!WinDisplay::setMode(virtuals[i].deviceName, spec.width, spec.height, spec.hz, x, y))
-            return QStringLiteral("设置分辨率失败: %1").arg(virtuals[i].deviceName);
-        x += spec.width;
+    // QRect::right() 是含端点；Windows 位置要用左+宽，否则与主屏重叠 1px，像复制
+    auto placeVirtuals = [&](QVector<MonitorInfo> &mons) -> QString {
+        int x = primary.geometry.x() + primary.geometry.width();
+        const int y = primary.geometry.top();
+        for (int i = 0; i < want; ++i) {
+            const DisplaySpec &spec = cfg.displays[i];
+            if (!WinDisplay::setMode(mons[i].deviceName, spec.width, spec.height, spec.hz, x, y))
+                return QStringLiteral("设置分辨率失败: %1").arg(mons[i].deviceName);
+            x += spec.width;
+        }
+        WinDisplay::applyDisplayChanges();
+        return {};
+    };
+
+    QString placeErr = placeVirtuals(virtuals);
+    if (!placeErr.isEmpty())
+        return placeErr;
+
+    if (WinDisplay::hasCloneTopology()) {
+        emit progress(QStringLiteral("检测到复制显示，再次强制扩展…"));
+        WinDisplay::forceExtendTopology();
+        QThread::msleep(250);
+        virtuals = waitVirtuals(want, 20);
+        if (virtuals.size() < want)
+            return QStringLiteral("扩展失败：仍像复制显示，桌面虚拟屏 %1/%2。")
+                .arg(virtuals.size())
+                .arg(want);
+        placeErr = placeVirtuals(virtuals);
+        if (!placeErr.isEmpty())
+            return placeErr;
     }
-    WinDisplay::applyDisplayChanges();
 
     emit progress(QStringLiteral("设置显示缩放…"));
     QThread::msleep(400);
     int dpiOk = 0;
     int dpiFail = 0;
+    const int primaryRight = primary.geometry.x() + primary.geometry.width();
     const QVector<MonitorInfo> after = currentVirtuals();
     for (int i = 0; i < want; ++i) {
         const DisplaySpec &spec = cfg.displays[i];
         QString device = virtuals[i].deviceName;
         for (const MonitorInfo &m : after) {
             if (m.geometry.width() == spec.width && m.geometry.height() == spec.height
-                && m.geometry.x() >= primary.geometry.right() - 8) {
+                && m.geometry.x() >= primaryRight - 8) {
                 device = m.deviceName;
                 break;
             }
@@ -248,6 +279,8 @@ QString VddService::arrangeAndDpi(const AppConfig &cfg)
     }
 
     QString msg = QStringLiteral("已就绪 %1 块虚拟屏（Parsec）").arg(want);
+    if (WinDisplay::hasCloneTopology())
+        msg += QStringLiteral("；警告：系统仍报告复制拓扑，请到显示设置确认「扩展这些显示器」");
     if (dpiOk > 0)
         msg += QStringLiteral("，缩放成功 %1").arg(dpiOk);
     if (dpiFail > 0)
@@ -307,6 +340,21 @@ QString VddService::applyConfig(const AppConfig &cfg, QString *detail)
     return msg;
 }
 
+QString VddService::rearrange(const AppConfig &cfg)
+{
+    QString err;
+    if (!ensureParsecOpen(&err))
+        return err;
+    WinDisplay::forceExtendTopology();
+    QThread::msleep(200);
+    QString msg = arrangeAndDpi(cfg);
+    if (!msg.startsWith(QStringLiteral("已就绪")) && !msg.startsWith(QStringLiteral("已应用")))
+        return msg;
+    if (WinDisplay::hasCloneTopology())
+        return msg + QStringLiteral("\n仍检测到复制拓扑，请到系统显示设置改成「扩展这些显示器」。");
+    return QStringLiteral("已强制扩展并重排。") + msg;
+}
+
 QString VddService::clearVirtualDisplays()
 {
     QString err;
@@ -353,6 +401,12 @@ QString VddService::addOne(const DisplaySpec &spec)
     if (virtuals.isEmpty())
         return QStringLiteral("已添加，但桌面尚未枚举到虚拟屏（可点刷新）。");
 
+    WinDisplay::forceExtendTopology();
+    QThread::msleep(200);
+    virtuals = waitVirtuals(m_parsecIndices.size(), 20);
+    if (virtuals.isEmpty())
+        return QStringLiteral("已添加，但扩展后仍未枚举到虚拟屏（可点刷新）。");
+
     const MonitorInfo &mon = virtuals.last();
     MonitorInfo primary;
     for (const MonitorInfo &m : WinDisplay::listMonitors()) {
@@ -361,8 +415,15 @@ QString VddService::addOne(const DisplaySpec &spec)
             break;
         }
     }
-    const int x = primary.deviceName.isEmpty() ? mon.geometry.x() : primary.geometry.right();
-    const int y = primary.deviceName.isEmpty() ? mon.geometry.y() : primary.geometry.top();
+    // 新屏接在现有虚拟屏最右侧；位置用左+宽，避免与主屏叠成「假复制」
+    int x = mon.geometry.x();
+    int y = mon.geometry.y();
+    if (!primary.deviceName.isEmpty()) {
+        x = primary.geometry.x() + primary.geometry.width();
+        y = primary.geometry.top();
+        for (int i = 0; i < virtuals.size() - 1; ++i)
+            x = qMax(x, virtuals[i].geometry.x() + virtuals[i].geometry.width());
+    }
     // 模式设置失败也不回滚加屏——驱动默认模式仍可用（与官方体验一致）
     if (!WinDisplay::setMode(mon.deviceName, spec.width, spec.height, spec.hz, x, y)) {
         WinDisplay::applyDisplayChanges();
@@ -372,9 +433,18 @@ QString VddService::addOne(const DisplaySpec &spec)
             .arg(spec.height);
     }
     WinDisplay::applyDisplayChanges();
+    if (WinDisplay::hasCloneTopology()) {
+        WinDisplay::forceExtendTopology();
+        QThread::msleep(200);
+        WinDisplay::setMode(mon.deviceName, spec.width, spec.height, spec.hz, x, y);
+        WinDisplay::applyDisplayChanges();
+    }
     QThread::msleep(250);
     WinDisplay::setDpiScale(mon.deviceName, spec.scale); // 失败忽略
-    return QStringLiteral("已添加「%1」%2×%3。").arg(spec.label).arg(spec.width).arg(spec.height);
+    QString msg = QStringLiteral("已添加「%1」%2×%3。").arg(spec.label).arg(spec.width).arg(spec.height);
+    if (WinDisplay::hasCloneTopology())
+        msg += QStringLiteral(" 警告：仍像复制显示，请到系统显示设置改成「扩展」。");
+    return msg;
 }
 
 QString VddService::removeAt(int index)

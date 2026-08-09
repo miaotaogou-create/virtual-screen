@@ -27,6 +27,10 @@ QVector<MonitorInfo> previewTargets(bool preferVirtual = true);
 
 bool setMode(const QString &deviceName, int width, int height, int hz, int x, int y);
 bool applyDisplayChanges();
+/** 是否存在「同一 source 绑多 target」的复制拓扑。 */
+bool hasCloneTopology();
+/** 强制整桌面为扩展（非复制）。 */
+bool forceExtendTopology();
 bool setDpiScale(const QString &deviceName, int scalePercent);
 QImage captureDesktopRect(const QRect &geo);
 

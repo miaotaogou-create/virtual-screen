@@ -588,6 +588,32 @@ void MainWindow::onCustomDialog()
 
 void MainWindow::onRefreshDisplays()
 {
+    // 复制拓扑或屏位重叠时，「刷新」顺便强制扩展并重排（不全量重建）
+    if (!m_cfg.displays.isEmpty() && m_vdd->trackedCount() > 0
+        && (WinDisplay::hasCloneTopology()
+            || [&]() {
+                   const auto virtuals = matchedVirtuals();
+                   MonitorInfo primary;
+                   for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+                       if (m.primary) {
+                           primary = m;
+                           break;
+                       }
+                   }
+                   for (const MonitorInfo &v : virtuals) {
+                       if (v.deviceName.isEmpty())
+                           continue;
+                       if (v.geometry.intersects(primary.geometry)
+                           && v.geometry.intersected(primary.geometry).width()
+                               > v.geometry.width() / 2)
+                           return true;
+                   }
+                   return false;
+               }())) {
+        const AppConfig c = m_cfg;
+        runBg([this, c]() { return m_vdd->rearrange(c); }, QStringLiteral("扩展重排"));
+        return;
+    }
     rebuildTabs();
     refreshPreview();
     m_title->setStatusHint(QStringLiteral("已刷新 · 虚拟屏 %1 / 配置 %2")
@@ -868,11 +894,26 @@ void MainWindow::refreshPreview()
     const QSize target = m_preview->size();
     const int tab = m_tabIndex;
 
-    m_title->setStatusHint(QStringLiteral("%1  %2×%3  缩放%4%")
-                               .arg(label)
-                               .arg(spec.width)
-                               .arg(spec.height)
-                               .arg(spec.scale));
+    QString hint = QStringLiteral("%1  %2×%3  缩放%4%")
+                       .arg(label)
+                       .arg(spec.width)
+                       .arg(spec.height)
+                       .arg(spec.scale);
+    if (WinDisplay::hasCloneTopology()) {
+        hint += QStringLiteral("  · 复制显示！点「刷新」强制扩展");
+    } else {
+        // 与主屏大幅重叠时，预览会看起来像「自己投放」了主屏上的程序
+        for (const MonitorInfo &m : WinDisplay::listMonitors()) {
+            if (!m.primary)
+                continue;
+            if (mon.geometry.intersects(m.geometry)
+                && mon.geometry.intersected(m.geometry).width() > mon.geometry.width() / 2) {
+                hint += QStringLiteral("  · 与主屏重叠，点「刷新」重排");
+                break;
+            }
+        }
+    }
+    m_title->setStatusHint(hint);
 
     m_grabBusy = true;
     auto *th = QThread::create([this, mon, target, label, tab]() {
