@@ -8,7 +8,7 @@ struct DisplaySpec {
     QString label;
     int width = 1920;
     int height = 1080;
-    int scale = 100;
+    int scale = 125;
     int hz = 60;
 };
 

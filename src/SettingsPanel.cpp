@@ -263,8 +263,8 @@ void SettingsDialog::addDisplay()
     DisplaySpec s;
     s.label = QStringLiteral("虚拟屏%1").arg(cur.displays.size() + 1);
     s.width = 1920;
-    s.height = 1080;
-    s.scale = 100;
+    s.height = 1200;
+    s.scale = 125;
     s.hz = 60;
     cur.displays.push_back(s);
     const QString name = m_profileHint->text().startsWith(QStringLiteral("当前配置："))

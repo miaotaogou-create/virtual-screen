@@ -58,7 +58,7 @@ static AppConfig parseObject(const QJsonObject &o)
         s.label = d.value(QStringLiteral("label")).toString(QStringLiteral("屏"));
         s.width = d.value(QStringLiteral("width")).toInt(1920);
         s.height = d.value(QStringLiteral("height")).toInt(1080);
-        s.scale = d.value(QStringLiteral("scale")).toInt(100);
+        s.scale = d.value(QStringLiteral("scale")).toInt(125);
         s.hz = d.value(QStringLiteral("hz")).toInt(60);
         c.displays.push_back(s);
     }
@@ -95,7 +95,7 @@ AppConfig AppConfig::defaults()
     a.label = QStringLiteral("虚拟屏1");
     a.width = 1920;
     a.height = 1200;
-    a.scale = 100;
+    a.scale = 125;
     a.hz = 60;
     c.displays = {a};
     c.previewIntervalMs = 2000;

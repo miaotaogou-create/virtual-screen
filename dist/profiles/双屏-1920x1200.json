@@ -7,14 +7,14 @@
             "label": "显控",
             "width": 1920,
             "height": 1200,
-            "scale": 100,
+            "scale": 125,
             "hz": 60
         },
         {
             "label": "视频",
             "width": 1920,
             "height": 1200,
-            "scale": 100,
+            "scale": 125,
             "hz": 60
         }
     ]

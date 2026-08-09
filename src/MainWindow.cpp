@@ -236,9 +236,9 @@ DisplaySpec MainWindow::defaultSpec(int ordinal) const
     DisplaySpec s;
     s.label = QStringLiteral("虚拟屏%1").arg(ordinal);
     s.width = 1920;
-    s.height = 1080;
+    s.height = 1200;
     s.hz = 60;
-    s.scale = 100;
+    s.scale = 125;
     return s;
 }
 
