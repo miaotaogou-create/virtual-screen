@@ -883,11 +883,11 @@ void MainWindow::refreshPreview()
     const QSize target = m_preview->size();
     const int tab = m_tabIndex;
 
-    m_title->setStatusHint(QStringLiteral("%1  %2×%3 @%4Hz")
+    m_title->setStatusHint(QStringLiteral("%1  %2×%3  缩放%4%")
                                .arg(label)
                                .arg(spec.width)
                                .arg(spec.height)
-                               .arg(spec.hz));
+                               .arg(spec.scale));
 
     m_grabBusy = true;
     auto *th = QThread::create([this, mon, target, label, tab]() {
