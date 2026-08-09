@@ -43,8 +43,6 @@ private slots:
     void onDeleteProfile(const QString &path);
     void showProfileMenu();
     void showDisplayContextMenu(int index, const QPoint &globalPos);
-    void onPreviewPointer(qreal nx, qreal ny, Qt::MouseButton button, bool pressed, int wheelDelta);
-    void onPreviewKey(int key, Qt::KeyboardModifiers mods, bool pressed);
 
 private:
     void rebuildTabs();
@@ -76,5 +74,4 @@ private:
     bool m_grabBusy = false;
     DisplaySpec m_pendingSpec;
     int m_pendingIndex = -1;
-    QRect m_previewGeo;
 };

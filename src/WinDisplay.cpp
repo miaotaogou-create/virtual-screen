@@ -272,30 +272,16 @@ bool setDpiScale(const QString &deviceName, int scalePercent)
 
 QImage captureDesktopRect(const QRect &geo)
 {
-    return captureDesktopRect(geo, QSize());
-}
-
-QImage captureDesktopRect(const QRect &geo, const QSize &maxSize)
-{
     if (geo.width() < 1 || geo.height() < 1)
         return {};
 
-    const int srcW = geo.width();
-    const int srcH = geo.height();
-    int dstW = srcW;
-    int dstH = srcH;
-    if (maxSize.width() > 1 && maxSize.height() > 1
-        && (srcW > maxSize.width() || srcH > maxSize.height())) {
-        const QSize fitted = QSize(srcW, srcH).scaled(maxSize, Qt::KeepAspectRatio);
-        dstW = fitted.width();
-        dstH = fitted.height();
-    }
-
+    const int w = geo.width();
+    const int h = geo.height();
     HDC screen = GetDC(nullptr);
     if (!screen)
         return {};
     HDC mem = CreateCompatibleDC(screen);
-    HBITMAP bmp = CreateCompatibleBitmap(screen, dstW, dstH);
+    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
     if (!mem || !bmp) {
         if (bmp)
             DeleteObject(bmp);
@@ -305,24 +291,19 @@ QImage captureDesktopRect(const QRect &geo, const QSize &maxSize)
         return {};
     }
     HGDIOBJ old = SelectObject(mem, bmp);
-    if (dstW == srcW && dstH == srcH) {
-        BitBlt(mem, 0, 0, dstW, dstH, screen, geo.x(), geo.y(), SRCCOPY | CAPTUREBLT);
-    } else {
-        SetStretchBltMode(mem, COLORONCOLOR);
-        StretchBlt(mem, 0, 0, dstW, dstH, screen, geo.x(), geo.y(), srcW, srcH, SRCCOPY | CAPTUREBLT);
-    }
+    BitBlt(mem, 0, 0, w, h, screen, geo.x(), geo.y(), SRCCOPY | CAPTUREBLT);
     SelectObject(mem, old);
 
     BITMAPINFOHEADER bi{};
     bi.biSize = sizeof(bi);
-    bi.biWidth = dstW;
-    bi.biHeight = -dstH;
+    bi.biWidth = w;
+    bi.biHeight = -h; // top-down
     bi.biPlanes = 1;
     bi.biBitCount = 32;
     bi.biCompression = BI_RGB;
 
-    QImage img(dstW, dstH, QImage::Format_ARGB32);
-    GetDIBits(screen, bmp, 0, UINT(dstH), img.bits(), reinterpret_cast<BITMAPINFO *>(&bi), DIB_RGB_COLORS);
+    QImage img(w, h, QImage::Format_ARGB32);
+    GetDIBits(screen, bmp, 0, UINT(h), img.bits(), reinterpret_cast<BITMAPINFO *>(&bi), DIB_RGB_COLORS);
 
     DeleteObject(bmp);
     DeleteDC(mem);
@@ -399,119 +380,6 @@ bool moveWindowToMonitor(qulonglong hwndVal, const QRect &monitorGeo)
     if (ok)
         ShowWindow(hwnd, SW_MAXIMIZE);
     return ok == TRUE;
-}
-
-static LONG toAbsoluteX(int desktopX, int vx, int vw)
-{
-    return MulDiv(desktopX - vx, 65535, qMax(1, vw - 1));
-}
-
-static LONG toAbsoluteY(int desktopY, int vy, int vh)
-{
-    return MulDiv(desktopY - vy, 65535, qMax(1, vh - 1));
-}
-
-bool sendMouseAt(int desktopX, int desktopY, Qt::MouseButton button, bool pressed, int wheelDelta)
-{
-    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    if (vw <= 1 || vh <= 1)
-        return false;
-
-    // 注入后立刻把光标拉回，系统指针不留在虚拟屏上；预览里靠软光标显示位置
-    POINT old{};
-    GetCursorPos(&old);
-
-    INPUT in{};
-    in.type = INPUT_MOUSE;
-    in.mi.dx = toAbsoluteX(desktopX, vx, vw);
-    in.mi.dy = toAbsoluteY(desktopY, vy, vh);
-    in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE;
-
-    if (wheelDelta != 0) {
-        in.mi.dwFlags |= MOUSEEVENTF_WHEEL;
-        in.mi.mouseData = DWORD(wheelDelta);
-        const UINT n = SendInput(1, &in, sizeof(INPUT));
-        SetCursorPos(old.x, old.y);
-        return n == 1;
-    }
-
-    if (button == Qt::LeftButton)
-        in.mi.dwFlags |= pressed ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
-    else if (button == Qt::RightButton)
-        in.mi.dwFlags |= pressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
-    else if (button == Qt::MiddleButton)
-        in.mi.dwFlags |= pressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-
-    const UINT n = SendInput(1, &in, sizeof(INPUT));
-    SetCursorPos(old.x, old.y);
-    return n == 1;
-}
-
-static WORD vkFromQtKey(int key)
-{
-    if (key >= Qt::Key_A && key <= Qt::Key_Z)
-        return WORD('A' + (key - Qt::Key_A));
-    if (key >= Qt::Key_0 && key <= Qt::Key_9)
-        return WORD('0' + (key - Qt::Key_0));
-    if (key >= Qt::Key_F1 && key <= Qt::Key_F12)
-        return WORD(VK_F1 + (key - Qt::Key_F1));
-    switch (key) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
-        return VK_RETURN;
-    case Qt::Key_Escape:
-        return VK_ESCAPE;
-    case Qt::Key_Tab:
-        return VK_TAB;
-    case Qt::Key_Backspace:
-        return VK_BACK;
-    case Qt::Key_Delete:
-        return VK_DELETE;
-    case Qt::Key_Insert:
-        return VK_INSERT;
-    case Qt::Key_Home:
-        return VK_HOME;
-    case Qt::Key_End:
-        return VK_END;
-    case Qt::Key_PageUp:
-        return VK_PRIOR;
-    case Qt::Key_PageDown:
-        return VK_NEXT;
-    case Qt::Key_Left:
-        return VK_LEFT;
-    case Qt::Key_Right:
-        return VK_RIGHT;
-    case Qt::Key_Up:
-        return VK_UP;
-    case Qt::Key_Down:
-        return VK_DOWN;
-    case Qt::Key_Space:
-        return VK_SPACE;
-    case Qt::Key_Shift:
-        return VK_SHIFT;
-    case Qt::Key_Control:
-        return VK_CONTROL;
-    case Qt::Key_Alt:
-        return VK_MENU;
-    default:
-        return 0;
-    }
-}
-
-bool sendKey(int qtKey, Qt::KeyboardModifiers mods, bool pressed)
-{
-    Q_UNUSED(mods);
-    const WORD vk = vkFromQtKey(qtKey);
-    if (!vk)
-        return false;
-    INPUT in{};
-    in.type = INPUT_KEYBOARD;
-    in.ki.wVk = vk;
-    in.ki.dwFlags = pressed ? 0 : KEYEVENTF_KEYUP;
-    return SendInput(1, &in, sizeof(INPUT)) == 1;
 }
 
 } // namespace WinDisplay
