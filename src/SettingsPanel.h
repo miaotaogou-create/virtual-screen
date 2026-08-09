@@ -26,12 +26,10 @@ public:
     void setDriverHint(const QString &text);
 
 signals:
-    void applyRequested();
     void saveRequested();
     void saveAsRequested();
     void loadProfileRequested(const QString &path);
     void browseLoadRequested();
-    void clearRequested();
 
 private slots:
     void addDisplay();

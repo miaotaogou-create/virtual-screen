@@ -58,7 +58,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     title->setStyleSheet(QStringLiteral("font-weight:600; color:#2DD4BF; font-size:13px;"));
     lay->addWidget(title);
     lay->addWidget(new QLabel(
-        QStringLiteral("按项目增减虚拟屏；用下拉切换已有配置。缩放% 会写入该屏的系统 DPI（100/125/150…）。"),
+        QStringLiteral("在此改规格并「保存方案」。真正创建虚拟屏请关对话框后点顶栏「应用」。"),
         this));
 
     m_driverHint = new QLabel(this);
@@ -102,14 +102,10 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     lay->addLayout(editBtns);
 
     auto *btns = new QHBoxLayout();
-    auto *apply = new QPushButton(QStringLiteral("应用配置"), this);
-    apply->setObjectName(QStringLiteral("primaryBtn"));
-    auto *save = new QPushButton(QStringLiteral("保存为当前"), this);
-    auto *clear = new QPushButton(QStringLiteral("清除虚拟屏"), this);
+    auto *save = new QPushButton(QStringLiteral("保存方案"), this);
+    save->setObjectName(QStringLiteral("primaryBtn"));
     auto *close = new QPushButton(QStringLiteral("关闭"), this);
-    btns->addWidget(apply);
     btns->addWidget(save);
-    btns->addWidget(clear);
     btns->addStretch();
     btns->addWidget(close);
     lay->addLayout(btns);
@@ -120,9 +116,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
             this, &SettingsDialog::onProfileComboChanged);
     connect(browseBtn, &QPushButton::clicked, this, &SettingsDialog::browseLoadRequested);
     connect(saveAsBtn, &QPushButton::clicked, this, &SettingsDialog::saveAsRequested);
-    connect(apply, &QPushButton::clicked, this, &SettingsDialog::applyRequested);
     connect(save, &QPushButton::clicked, this, &SettingsDialog::saveRequested);
-    connect(clear, &QPushButton::clicked, this, &SettingsDialog::clearRequested);
     connect(close, &QPushButton::clicked, this, &QDialog::reject);
 }
 

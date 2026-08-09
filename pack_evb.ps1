@@ -31,6 +31,15 @@ foreach ($f in "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
 Get-ChildItem $outDir -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
+# 配置与方案放 exe 旁边（不要打进 EVB），首启就能选预设
+if (Test-Path "$dist\profiles") {
+    Copy-Item "$dist\profiles" $outDir -Recurse -Force
+}
+$cfgSrc = if (Test-Path "$dist\config.example.json") { "$dist\config.example.json" } else { "$dist\config.json" }
+if (Test-Path $cfgSrc) {
+    Copy-Item $cfgSrc (Join-Path $outDir "config.json") -Force
+}
+
 $inputExe = Join-Path $stage "VirtualScreen.exe"
 $outputExe = Join-Path $outDir "VirtualScreen.exe"
 
@@ -45,7 +54,7 @@ Write-Host "  4. 若树里出现 VirtualScreen.exe，选中后点 Remove（主�
 Write-Host "  5. 点 Process；完成后 File → Save Project As →"
 Write-Host "       $(Join-Path $PSScriptRoot 'pack\VirtualScreen.evb')"
 Write-Host ""
-Write-Host "打完后把 dist\profiles 和 config.example.json 拷到 dist\portable\ 旁边即可。"
+Write-Host "已预先放入 dist\portable\profiles 与 config.json（与 exe 同级，勿打进虚拟盒）。"
 Write-Host ""
 
 if (Test-Path $evbGui) {

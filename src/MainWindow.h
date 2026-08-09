@@ -15,6 +15,7 @@ class QPushButton;
 class QLabel;
 class QTimer;
 class QHBoxLayout;
+class QComboBox;
 
 class MainWindow : public QWidget
 {
@@ -37,13 +38,22 @@ private slots:
     void onSaveAsSettings();
     void onLoadProfile(const QString &path);
     void onBrowseLoadSettings();
+    void onMainProfileChanged(int index);
     void togglePreview();
     void refreshPreview();
     void selectTab(int index);
+    void onGuidePrimary();
+    void onGuideSecondary();
 
 private:
     void rebuildTabs();
+    void refreshProfileCombo();
+    void refreshGuide();
     void updateDriverUi();
+    void setPreviewEnabled(bool on);
+    void setBusyUi(bool busy);
+    void openDriverPage();
+    bool confirmElevate(const QString &action);
     void runBg(const std::function<QString()> &work, const QString &title);
     /** 按配置顺序匹配虚拟屏：先分辨率，再从左到右。 */
     QVector<MonitorInfo> matchedVirtuals() const;
@@ -53,6 +63,8 @@ private:
     TitleBar *m_title = nullptr;
     QWidget *m_tabBar = nullptr;
     QHBoxLayout *m_tabLay = nullptr;
+    QLabel *m_profileLabel = nullptr;
+    QComboBox *m_profileCombo = nullptr;
     QPushButton *m_previewToggle = nullptr;
     PreviewPane *m_preview = nullptr;
     SettingsDialog *m_settings = nullptr;
