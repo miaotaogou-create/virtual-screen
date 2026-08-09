@@ -92,7 +92,7 @@ AppConfig AppConfig::defaults()
 {
     AppConfig c;
     DisplaySpec a;
-    a.label = QStringLiteral("虚拟屏1");
+    a.label = QStringLiteral("屏1");
     a.width = 1920;
     a.height = 1200;
     a.scale = 125;

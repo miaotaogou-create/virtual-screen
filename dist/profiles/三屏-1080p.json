@@ -4,21 +4,21 @@
     "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml",
     "displays": [
         {
-            "label": "左屏",
+            "label": "屏1",
             "width": 1920,
             "height": 1080,
             "scale": 100,
             "hz": 60
         },
         {
-            "label": "中屏",
+            "label": "屏2",
             "width": 1920,
             "height": 1080,
             "scale": 100,
             "hz": 60
         },
         {
-            "label": "右屏",
+            "label": "屏3",
             "width": 1920,
             "height": 1080,
             "scale": 100,

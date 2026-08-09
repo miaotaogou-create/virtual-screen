@@ -234,7 +234,7 @@ void MainWindow::persistCfg()
 DisplaySpec MainWindow::defaultSpec(int ordinal) const
 {
     DisplaySpec s;
-    s.label = QStringLiteral("虚拟屏%1").arg(ordinal);
+    s.label = QStringLiteral("屏%1").arg(ordinal);
     s.width = 1920;
     s.height = 1200;
     s.hz = 60;
@@ -342,7 +342,7 @@ void MainWindow::rebuildTabs()
     for (int i = 0; i < m_cfg.displays.size(); ++i) {
         const DisplaySpec &spec = m_cfg.displays[i];
         const QString text = spec.label.trimmed().isEmpty()
-                                 ? QStringLiteral("虚拟屏%1").arg(i + 1)
+                                 ? QStringLiteral("屏%1").arg(i + 1)
                                  : spec.label.trimmed();
         auto *btn = new QPushButton(text, m_bottom);
         btn->setCursor(Qt::PointingHandCursor);
@@ -614,7 +614,7 @@ void MainWindow::addDisplaySpec(const DisplaySpec &spec)
 {
     DisplaySpec s = spec;
     if (s.label.trimmed().isEmpty())
-        s.label = QStringLiteral("虚拟屏%1").arg(m_cfg.displays.size() + 1);
+        s.label = QStringLiteral("屏%1").arg(m_cfg.displays.size() + 1);
 
     m_pendingSpec = s;
     m_pendingIndex = m_cfg.displays.size();

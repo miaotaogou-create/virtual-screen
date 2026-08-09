@@ -4,10 +4,10 @@
   "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml",
   "displays": [
     {
-      "label": "虚拟屏1",
+      "label": "屏1",
       "width": 1920,
       "height": 1200,
-      "scale": 100,
+      "scale": 125,
       "hz": 60
     }
   ]

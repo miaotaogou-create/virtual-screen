@@ -261,7 +261,7 @@ void SettingsDialog::addDisplay()
     }
     AppConfig cur = toConfig(AppConfig::defaults());
     DisplaySpec s;
-    s.label = QStringLiteral("虚拟屏%1").arg(cur.displays.size() + 1);
+    s.label = QStringLiteral("屏%1").arg(cur.displays.size() + 1);
     s.width = 1920;
     s.height = 1200;
     s.scale = 125;
