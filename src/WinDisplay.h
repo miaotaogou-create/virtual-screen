@@ -1,9 +1,10 @@
 #pragma once
 
+#include <QImage>
 #include <QRect>
 #include <QString>
 #include <QVector>
-#include <QImage>
+#include <Qt>
 
 struct MonitorInfo {
     QString deviceName;
@@ -33,5 +34,9 @@ QImage captureDesktopRect(const QRect &geo);
 /** 枚举可见顶层窗口（投放用）。 */
 QVector<TopWindowInfo> listTopWindows();
 bool moveWindowToMonitor(qulonglong hwnd, const QRect &monitorGeo);
+
+/** 向虚拟桌面绝对坐标注入鼠标（含跨屏）。 */
+bool sendMouseAt(int desktopX, int desktopY, Qt::MouseButton button, bool pressed, int wheelDelta = 0);
+bool sendKey(int qtKey, Qt::KeyboardModifiers mods, bool pressed);
 
 } // namespace WinDisplay

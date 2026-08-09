@@ -124,6 +124,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(placeBtn, &QPushButton::clicked, this, &MainWindow::onPlaceWindow);
     connect(customBtn, &QPushButton::clicked, this, &MainWindow::onCustomDialog);
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::onAddDisplay);
+    connect(m_preview, &PreviewPane::pointerEvent, this, &MainWindow::onPreviewPointer);
+    connect(m_preview, &PreviewPane::keyEvent, this, &MainWindow::onPreviewKey);
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
     });
@@ -151,7 +153,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_timer = new QTimer(this);
     connect(m_timer, &QTimer::timeout, this, &MainWindow::refreshPreview);
-    m_timer->start(qMax(1500, m_cfg.previewIntervalMs));
+    m_timer->start(qMax(800, m_cfg.previewIntervalMs));
 
     rebuildTabs();
     if (m_vdd->driverReady()) {
@@ -863,6 +865,7 @@ void MainWindow::refreshPreview()
         return;
 
     if (m_cfg.displays.isEmpty()) {
+        m_previewGeo = QRect();
         m_preview->setPlaceholder(QStringLiteral("点「添加显示」或从「方案…」加载"));
         return;
     }
@@ -874,12 +877,14 @@ void MainWindow::refreshPreview()
     const DisplaySpec &spec = m_cfg.displays[m_tabIndex];
     const QString label = spec.label;
     if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
+        m_previewGeo = QRect();
         m_preview->setPlaceholder(
             QStringLiteral("「%1」未出现在系统显示器列表中").arg(label));
         m_title->setStatusHint(QStringLiteral("%1 · 系统未挂上").arg(label));
         return;
     }
     const MonitorInfo mon = virtuals[m_tabIndex];
+    m_previewGeo = mon.geometry;
     const QSize target = m_preview->size();
     const int tab = m_tabIndex;
 
@@ -909,4 +914,39 @@ void MainWindow::refreshPreview()
     });
     connect(th, &QThread::finished, th, &QObject::deleteLater);
     th->start();
+}
+
+void MainWindow::onPreviewPointer(qreal nx, qreal ny, Qt::MouseButton button, bool pressed, int wheelDelta)
+{
+    if (m_previewGeo.isEmpty())
+        return;
+    const int x = m_previewGeo.left() + int(nx * qMax(1, m_previewGeo.width() - 1));
+    const int y = m_previewGeo.top() + int(ny * qMax(1, m_previewGeo.height() - 1));
+
+    if (wheelDelta != 0) {
+        WinDisplay::sendMouseAt(x, y, Qt::NoButton, false, wheelDelta);
+        return;
+    }
+
+    if (button != Qt::NoButton && pressed) {
+        POINT pt{};
+        GetCursorPos(&pt);
+        m_savedCursor = QPoint(int(pt.x), int(pt.y));
+        m_cursorSaved = true;
+    }
+
+    WinDisplay::sendMouseAt(x, y, button, pressed, 0);
+
+    // 点击/拖拽结束后把光标拉回预览，便于连续操作
+    if (button != Qt::NoButton && !pressed && m_cursorSaved) {
+        SetCursorPos(m_savedCursor.x(), m_savedCursor.y());
+        m_cursorSaved = false;
+    }
+}
+
+void MainWindow::onPreviewKey(int key, Qt::KeyboardModifiers mods, bool pressed)
+{
+    if (m_previewGeo.isEmpty())
+        return;
+    WinDisplay::sendKey(key, mods, pressed);
 }

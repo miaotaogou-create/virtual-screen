@@ -3,6 +3,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
+#include <QtGlobal>
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -380,6 +381,112 @@ bool moveWindowToMonitor(qulonglong hwndVal, const QRect &monitorGeo)
     if (ok)
         ShowWindow(hwnd, SW_MAXIMIZE);
     return ok == TRUE;
+}
+
+static LONG toAbsoluteX(int desktopX, int vx, int vw)
+{
+    return MulDiv(desktopX - vx, 65535, qMax(1, vw - 1));
+}
+
+static LONG toAbsoluteY(int desktopY, int vy, int vh)
+{
+    return MulDiv(desktopY - vy, 65535, qMax(1, vh - 1));
+}
+
+bool sendMouseAt(int desktopX, int desktopY, Qt::MouseButton button, bool pressed, int wheelDelta)
+{
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (vw <= 1 || vh <= 1)
+        return false;
+
+    INPUT in{};
+    in.type = INPUT_MOUSE;
+    in.mi.dx = toAbsoluteX(desktopX, vx, vw);
+    in.mi.dy = toAbsoluteY(desktopY, vy, vh);
+    in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE;
+
+    if (wheelDelta != 0) {
+        in.mi.dwFlags |= MOUSEEVENTF_WHEEL;
+        in.mi.mouseData = DWORD(wheelDelta);
+        return SendInput(1, &in, sizeof(INPUT)) == 1;
+    }
+
+    if (button == Qt::LeftButton)
+        in.mi.dwFlags |= pressed ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    else if (button == Qt::RightButton)
+        in.mi.dwFlags |= pressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+    else if (button == Qt::MiddleButton)
+        in.mi.dwFlags |= pressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+    // NoButton：仅移动
+
+    return SendInput(1, &in, sizeof(INPUT)) == 1;
+}
+
+static WORD vkFromQtKey(int key)
+{
+    if (key >= Qt::Key_A && key <= Qt::Key_Z)
+        return WORD('A' + (key - Qt::Key_A));
+    if (key >= Qt::Key_0 && key <= Qt::Key_9)
+        return WORD('0' + (key - Qt::Key_0));
+    if (key >= Qt::Key_F1 && key <= Qt::Key_F12)
+        return WORD(VK_F1 + (key - Qt::Key_F1));
+    switch (key) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        return VK_RETURN;
+    case Qt::Key_Escape:
+        return VK_ESCAPE;
+    case Qt::Key_Tab:
+        return VK_TAB;
+    case Qt::Key_Backspace:
+        return VK_BACK;
+    case Qt::Key_Delete:
+        return VK_DELETE;
+    case Qt::Key_Insert:
+        return VK_INSERT;
+    case Qt::Key_Home:
+        return VK_HOME;
+    case Qt::Key_End:
+        return VK_END;
+    case Qt::Key_PageUp:
+        return VK_PRIOR;
+    case Qt::Key_PageDown:
+        return VK_NEXT;
+    case Qt::Key_Left:
+        return VK_LEFT;
+    case Qt::Key_Right:
+        return VK_RIGHT;
+    case Qt::Key_Up:
+        return VK_UP;
+    case Qt::Key_Down:
+        return VK_DOWN;
+    case Qt::Key_Space:
+        return VK_SPACE;
+    case Qt::Key_Shift:
+        return VK_SHIFT;
+    case Qt::Key_Control:
+        return VK_CONTROL;
+    case Qt::Key_Alt:
+        return VK_MENU;
+    default:
+        return 0;
+    }
+}
+
+bool sendKey(int qtKey, Qt::KeyboardModifiers mods, bool pressed)
+{
+    Q_UNUSED(mods);
+    const WORD vk = vkFromQtKey(qtKey);
+    if (!vk)
+        return false;
+    INPUT in{};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wVk = vk;
+    in.ki.dwFlags = pressed ? 0 : KEYEVENTF_KEYUP;
+    return SendInput(1, &in, sizeof(INPUT)) == 1;
 }
 
 } // namespace WinDisplay

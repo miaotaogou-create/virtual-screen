@@ -1,16 +1,21 @@
 #include "PreviewPane.h"
 
-#include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
+#include <QWheelEvent>
+#include <QHBoxLayout>
 
 PreviewPane::PreviewPane(QWidget *parent)
     : QWidget(parent)
 {
     setAttribute(Qt::WA_OpaquePaintEvent);
+    setFocusPolicy(Qt::ClickFocus);
+    setMouseTracking(true);
     m_placeholder = QStringLiteral("暂无预览");
 
     m_guide = new QWidget(this);
@@ -87,6 +92,7 @@ void PreviewPane::setPixmap(const QPixmap &pm)
     if (!pm.isNull()) {
         m_placeholder.clear();
         showGuidePanel(false);
+        setCursor(Qt::CrossCursor);
     }
     update();
 }
@@ -96,6 +102,7 @@ void PreviewPane::setPlaceholder(const QString &text)
     m_placeholder = text;
     m_source = QPixmap();
     m_scaled = QPixmap();
+    setCursor(Qt::ArrowCursor);
     showGuidePanel(false);
     update();
 }
@@ -106,6 +113,7 @@ void PreviewPane::setGuide(const QString &title, const QString &body,
     m_source = QPixmap();
     m_scaled = QPixmap();
     m_placeholder.clear();
+    setCursor(Qt::ArrowCursor);
     m_guideTitle->setText(title);
     m_guideBody->setText(body);
     m_primary->setText(primaryText);
@@ -135,6 +143,106 @@ void PreviewPane::ensureScaled()
         return;
     }
     m_scaled = m_source.scaled(fitted, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+}
+
+QRect PreviewPane::contentRect() const
+{
+    if (m_source.isNull())
+        return {};
+    const_cast<PreviewPane *>(this)->ensureScaled();
+    if (m_scaled.isNull())
+        return {};
+    const int x = (width() - m_scaled.width()) / 2;
+    const int y = (height() - m_scaled.height()) / 2;
+    return QRect(x, y, m_scaled.width(), m_scaled.height());
+}
+
+bool PreviewPane::mapToNorm(const QPoint &pos, qreal *nx, qreal *ny) const
+{
+    const QRect r = contentRect();
+    if (r.width() < 2 || r.height() < 2 || !r.contains(pos))
+        return false;
+    *nx = qreal(pos.x() - r.x()) / qreal(r.width() - 1);
+    *ny = qreal(pos.y() - r.y()) / qreal(r.height() - 1);
+    *nx = qBound(0.0, *nx, 1.0);
+    *ny = qBound(0.0, *ny, 1.0);
+    return true;
+}
+
+void PreviewPane::emitPointer(const QPoint &pos, Qt::MouseButton button, bool pressed, int wheelDelta)
+{
+    qreal nx = 0, ny = 0;
+    if (!mapToNorm(pos, &nx, &ny))
+        return;
+    emit pointerEvent(nx, ny, button, pressed, wheelDelta);
+}
+
+void PreviewPane::mousePressEvent(QMouseEvent *e)
+{
+    if (m_source.isNull()) {
+        QWidget::mousePressEvent(e);
+        return;
+    }
+    setFocus(Qt::MouseFocusReason);
+    grabMouse();
+    m_dragging = true;
+    emitPointer(e->pos(), e->button(), true);
+    e->accept();
+}
+
+void PreviewPane::mouseReleaseEvent(QMouseEvent *e)
+{
+    if (m_source.isNull()) {
+        QWidget::mouseReleaseEvent(e);
+        return;
+    }
+    emitPointer(e->pos(), e->button(), false);
+    m_dragging = false;
+    if (mouseGrabber() == this)
+        releaseMouse();
+    e->accept();
+}
+
+void PreviewPane::mouseMoveEvent(QMouseEvent *e)
+{
+    if (m_source.isNull()) {
+        QWidget::mouseMoveEvent(e);
+        return;
+    }
+    // 仅按下拖拽时转发移动，避免 SendInput 把光标打到虚拟屏后丢跟踪
+    if (m_dragging || (e->buttons() != Qt::NoButton))
+        emitPointer(e->pos(), Qt::NoButton, true);
+    e->accept();
+}
+
+void PreviewPane::wheelEvent(QWheelEvent *e)
+{
+    if (m_source.isNull()) {
+        QWidget::wheelEvent(e);
+        return;
+    }
+    emitPointer(e->pos(), Qt::NoButton, false, e->angleDelta().y());
+    e->accept();
+}
+
+void PreviewPane::keyPressEvent(QKeyEvent *e)
+{
+    if (m_source.isNull() || e->isAutoRepeat()) {
+        QWidget::keyPressEvent(e);
+        return;
+    }
+    emit keyEvent(e->key(), e->modifiers(), true);
+    e->accept();
+}
+
+void PreviewPane::keyReleaseEvent(QKeyEvent *e)
+{
+    if (m_source.isNull() || e->isAutoRepeat()) {
+        QWidget::keyReleaseEvent(e);
+        return;
+    }
+    emit keyEvent(e->key(), e->modifiers(), false);
+    e->accept();
 }
 
 void PreviewPane::paintEvent(QPaintEvent *)
