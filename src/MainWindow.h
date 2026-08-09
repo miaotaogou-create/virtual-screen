@@ -9,13 +9,12 @@
 class TitleBar;
 class PreviewPane;
 class SettingsDialog;
-
 class VddService;
 class QPushButton;
 class QLabel;
 class QTimer;
 class QHBoxLayout;
-class QComboBox;
+class QMenu;
 
 class MainWindow : public QWidget
 {
@@ -34,21 +33,24 @@ protected:
     bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
 
 private slots:
-    void toggleSettings();
-    void onSaveSettings();
-    void onSaveAsSettings();
-    void onLoadProfile(const QString &path);
-    void onBrowseLoadSettings();
-    void onMainProfileChanged(int index);
+    void onAddDisplay();
+    void onCustomDialog();
+    void onRefreshDisplays();
+    void onPlaceWindow();
     void togglePreview();
     void refreshPreview();
     void selectTab(int index);
     void onGuidePrimary();
     void onGuideSecondary();
+    void onSaveProfile();
+    void onSaveProfileAs();
+    void onLoadProfile(const QString &path);
+    void onDeleteProfile(const QString &path);
+    void showProfileMenu();
+    void showDisplayContextMenu(int index, const QPoint &globalPos);
 
 private:
     void rebuildTabs();
-    void refreshProfileCombo();
     void refreshGuide();
     void updateDriverUi();
     void setPreviewEnabled(bool on);
@@ -56,8 +58,13 @@ private:
     void openDriverPage();
     QString bundledDriverInstaller() const;
     bool confirmElevate(const QString &action);
+    bool ensureAdminFor(const QString &action, const QStringList &args);
     void runBg(const std::function<QString()> &work, const QString &title);
-    /** 按配置顺序匹配虚拟屏：先分辨率，再从左到右。 */
+    void persistCfg();
+    DisplaySpec defaultSpec(int ordinal) const;
+    void addDisplaySpec(const DisplaySpec &spec);
+    void removeDisplayAt(int index);
+    void updateDisplayAt(int index, const DisplaySpec &spec);
     QVector<MonitorInfo> matchedVirtuals() const;
     int hitTestBorder(const QPoint &pos) const;
 
@@ -65,16 +72,18 @@ private:
     TitleBar *m_title = nullptr;
     QWidget *m_tabBar = nullptr;
     QHBoxLayout *m_tabLay = nullptr;
-    QLabel *m_profileLabel = nullptr;
-    QComboBox *m_profileCombo = nullptr;
     QPushButton *m_previewToggle = nullptr;
     PreviewPane *m_preview = nullptr;
+    QWidget *m_bottom = nullptr;
     SettingsDialog *m_settings = nullptr;
     VddService *m_vdd = nullptr;
     QTimer *m_timer = nullptr;
     QVector<QPushButton *> m_tabs;
     int m_tabIndex = 0;
-    bool m_previewOn = false; // 默认关：抓屏贵，需要时再开
+    bool m_previewOn = false;
     bool m_busy = false;
     bool m_grabBusy = false;
+    /** runBg 成功后写回配置用。 */
+    DisplaySpec m_pendingSpec;
+    int m_pendingIndex = -1;
 };

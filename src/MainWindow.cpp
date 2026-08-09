@@ -6,22 +6,30 @@
 #include "TitleBar.h"
 #include "VddService.h"
 
-#include <QCoreApplication>
+#include <QAction>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QInputDialog>
 #include <QLabel>
+#include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QSpinBox>
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
@@ -36,6 +44,22 @@
 
 static const char *kDriverReleasesUrl =
     "https://github.com/nomi-san/parsec-vdd/releases";
+
+static QString btnStyle(bool primary)
+{
+    if (primary) {
+        return QStringLiteral(
+            "QPushButton { color:#0B1220; background:#F8FAFC; border:1px solid #F8FAFC;"
+            " padding:6px 14px; font-weight:600; }"
+            "QPushButton:hover { background:#E2E8F0; }"
+            "QPushButton:disabled { color:#64748B; background:#1E293B; border-color:#334155; }");
+    }
+    return QStringLiteral(
+        "QPushButton { color:#E2E8F0; background:transparent; border:1px solid #64748B;"
+        " padding:6px 12px; }"
+        "QPushButton:hover { background:#1E293B; border-color:#94A3B8; }"
+        "QPushButton:disabled { color:#64748B; border-color:#334155; }");
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QWidget(parent)
@@ -56,73 +80,109 @@ MainWindow::MainWindow(QWidget *parent)
     m_title->setAdminHint(Elevate::isAdmin() ? QStringLiteral("管理员") : QStringLiteral("普通权限"));
     root->addWidget(m_title);
 
-    // Tab 行：方案下拉 + 虚拟屏 Tab + 预览开关
     m_tabBar = new QWidget(this);
-    m_tabBar->setFixedHeight(32);
-    m_tabBar->setStyleSheet(QStringLiteral(
-        "background:#0B1220;"
-        "QLabel { color:#94A3B8; }"
-        "QComboBox {"
-        "  padding:2px 8px; border:1px solid #334155; background:#111827; color:#E2E8F0;"
-        "  min-width:140px;"
-        "}"
-        "QComboBox QAbstractItemView { background:#111827; color:#E2E8F0; selection-background-color:#0F766E; }"));
+    m_tabBar->setFixedHeight(36);
+    m_tabBar->setStyleSheet(QStringLiteral("background:#0B1220;"));
     m_tabLay = new QHBoxLayout(m_tabBar);
-    m_tabLay->setContentsMargins(8, 3, 8, 3);
+    m_tabLay->setContentsMargins(10, 4, 10, 4);
     m_tabLay->setSpacing(6);
-
-    m_profileLabel = new QLabel(QStringLiteral("方案"), m_tabBar);
-    m_profileCombo = new QComboBox(m_tabBar);
-    m_profileCombo->setToolTip(QStringLiteral("切换已有配置方案；改完后点顶栏「应用」"));
-    m_tabLay->addWidget(m_profileLabel);
-    m_tabLay->addWidget(m_profileCombo);
-    m_tabLay->addSpacing(8);
     m_tabLay->addStretch();
-
     m_previewToggle = new QPushButton(QStringLiteral("预览:关"), m_tabBar);
-    m_previewToggle->setFlat(true);
     m_previewToggle->setCursor(Qt::PointingHandCursor);
-    m_previewToggle->setMinimumWidth(72);
-    m_previewToggle->setStyleSheet(QStringLiteral(
-        "QPushButton { color:#fff; background:#334155; padding:4px 14px; border:none; font-weight:600; }"
-        "QPushButton:hover { background:#475569; }"
-        "QPushButton:disabled { color:#64748B; }"));
+    m_previewToggle->setStyleSheet(btnStyle(false));
     m_tabLay->addWidget(m_previewToggle);
     root->addWidget(m_tabBar);
 
     m_preview = new PreviewPane(this);
     root->addWidget(m_preview, 1);
 
+    m_bottom = new QWidget(this);
+    m_bottom->setFixedHeight(52);
+    m_bottom->setStyleSheet(QStringLiteral("background:#111827; border-top:1px solid #1E293B;"));
+    auto *bot = new QHBoxLayout(m_bottom);
+    bot->setContentsMargins(12, 8, 12, 8);
+    bot->setSpacing(8);
+
+    auto *brand = new QLabel(QStringLiteral("VirtualScreen"), m_bottom);
+    brand->setStyleSheet(QStringLiteral("color:#94A3B8; font-weight:600;"));
+    bot->addWidget(brand);
+    bot->addStretch();
+
+    auto *profileBtn = new QPushButton(QStringLiteral("方案…"), m_bottom);
+    auto *refreshBtn = new QPushButton(QStringLiteral("刷新"), m_bottom);
+    auto *placeBtn = new QPushButton(QStringLiteral("投放窗口"), m_bottom);
+    auto *customBtn = new QPushButton(QStringLiteral("自定义…"), m_bottom);
+    auto *addBtn = new QPushButton(QStringLiteral("添加显示"), m_bottom);
+    profileBtn->setStyleSheet(btnStyle(false));
+    refreshBtn->setStyleSheet(btnStyle(false));
+    placeBtn->setStyleSheet(btnStyle(false));
+    customBtn->setStyleSheet(btnStyle(false));
+    addBtn->setStyleSheet(btnStyle(true));
+    for (QPushButton *b : {profileBtn, refreshBtn, placeBtn, customBtn, addBtn})
+        b->setCursor(Qt::PointingHandCursor);
+    bot->addWidget(profileBtn);
+    bot->addWidget(refreshBtn);
+    bot->addWidget(placeBtn);
+    bot->addWidget(customBtn);
+    bot->addWidget(addBtn);
+    root->addWidget(m_bottom);
+
     m_settings = new SettingsDialog(this);
     m_settings->loadFrom(m_cfg);
 
-    connect(m_title, &TitleBar::applyClicked, this, &MainWindow::onApply);
     connect(m_title, &TitleBar::clearClicked, this, &MainWindow::onClear);
-    connect(m_title, &TitleBar::settingsClicked, this, &MainWindow::toggleSettings);
     connect(m_title, &TitleBar::closeClicked, this, &QWidget::close);
     connect(m_previewToggle, &QPushButton::clicked, this, &MainWindow::togglePreview);
-    connect(m_profileCombo, QOverload<int>::of(&QComboBox::activated),
-            this, &MainWindow::onMainProfileChanged);
-    connect(m_settings, &SettingsDialog::saveRequested, this, &MainWindow::onSaveSettings);
-    connect(m_settings, &SettingsDialog::saveAsRequested, this, &MainWindow::onSaveAsSettings);
-    connect(m_settings, &SettingsDialog::loadProfileRequested, this, &MainWindow::onLoadProfile);
-    connect(m_settings, &SettingsDialog::browseLoadRequested, this, &MainWindow::onBrowseLoadSettings);
+    connect(profileBtn, &QPushButton::clicked, this, &MainWindow::showProfileMenu);
+    connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshDisplays);
+    connect(placeBtn, &QPushButton::clicked, this, &MainWindow::onPlaceWindow);
+    connect(customBtn, &QPushButton::clicked, this, &MainWindow::onCustomDialog);
+    connect(addBtn, &QPushButton::clicked, this, &MainWindow::onAddDisplay);
     connect(m_preview, &PreviewPane::primaryClicked, this, &MainWindow::onGuidePrimary);
     connect(m_preview, &PreviewPane::secondaryClicked, this, &MainWindow::onGuideSecondary);
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
+    });
+    connect(m_settings, &SettingsDialog::saveRequested, this, [this]() {
+        AppConfig c = m_settings->toConfig(m_cfg);
+        const QStringList errs = c.validate();
+        if (!errs.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
+            return;
+        }
+        m_cfg = c;
+        persistCfg();
+        rebuildTabs();
+        m_title->setStatusHint(QStringLiteral("方案已写入 · 点「添加显示」或加载后应用"));
+        if (QMessageBox::question(this, QStringLiteral("应用方案"),
+                                  QStringLiteral("配置已保存。是否立即按方案重建虚拟屏？"))
+            == QMessageBox::Yes)
+            onApply();
+    });
+    connect(m_settings, &SettingsDialog::saveAsRequested, this, &MainWindow::onSaveProfileAs);
+    connect(m_settings, &SettingsDialog::loadProfileRequested, this, &MainWindow::onLoadProfile);
+    connect(m_settings, &SettingsDialog::browseLoadRequested, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("加载配置"), profilesDir(), QStringLiteral("配置 (*.json)"));
+        if (!path.isEmpty())
+            onLoadProfile(path);
     });
 
     m_timer = new QTimer(this);
     connect(m_timer, &QTimer::timeout, this, &MainWindow::refreshPreview);
     m_timer->start(qMax(1500, m_cfg.previewIntervalMs));
 
-    refreshProfileCombo();
     rebuildTabs();
-    if (m_vdd->driverReady())
-        m_title->setStatusHint(QStringLiteral("驱动就绪 · 选方案后点「应用」"));
-    else
+    if (m_vdd->driverReady()) {
+        if (m_cfg.displays.isEmpty())
+            m_title->setStatusHint(QStringLiteral("驱动就绪 · 点「添加显示」"));
+        else
+            m_title->setStatusHint(QStringLiteral("已加载方案「%1」· 可添加/右键改规格")
+                                       .arg(m_cfg.profileName.isEmpty() ? QStringLiteral("当前")
+                                                                       : m_cfg.profileName));
+    } else {
         updateDriverUi();
+    }
     refreshGuide();
 }
 
@@ -188,6 +248,23 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
     return QWidget::nativeEvent(eventType, message, result);
 }
 
+void MainWindow::persistCfg()
+{
+    m_cfg.save();
+    m_settings->loadFrom(m_cfg);
+}
+
+DisplaySpec MainWindow::defaultSpec(int ordinal) const
+{
+    DisplaySpec s;
+    s.label = QStringLiteral("虚拟屏%1").arg(ordinal);
+    s.width = 1920;
+    s.height = 1080;
+    s.hz = 60;
+    s.scale = 100;
+    return s;
+}
+
 void MainWindow::updateDriverUi()
 {
     if (m_vdd->driverReady()) {
@@ -196,34 +273,6 @@ void MainWindow::updateDriverUi()
     }
     m_title->setStatusHint(QStringLiteral("未检测到驱动"));
     m_settings->setDriverHint(m_vdd->installDriverHint());
-}
-
-void MainWindow::refreshProfileCombo()
-{
-    m_profileCombo->blockSignals(true);
-    m_profileCombo->clear();
-    m_profileCombo->addItem(QStringLiteral("（当前）%1")
-                                .arg(m_cfg.profileName.isEmpty() ? QStringLiteral("未命名")
-                                                                 : m_cfg.profileName),
-                            QString());
-    const QStringList paths = listProfilePaths();
-    int sel = 0;
-    for (int i = 0; i < paths.size(); ++i) {
-        const QString name = QFileInfo(paths[i]).completeBaseName();
-        m_profileCombo->addItem(name, paths[i]);
-        if (!m_cfg.profileName.isEmpty() && name == m_cfg.profileName)
-            sel = i + 1;
-    }
-    m_profileCombo->setCurrentIndex(sel);
-    m_profileCombo->blockSignals(false);
-}
-
-void MainWindow::onMainProfileChanged(int index)
-{
-    const QString path = m_profileCombo->itemData(index).toString();
-    if (path.isEmpty())
-        return;
-    onLoadProfile(path);
 }
 
 void MainWindow::setPreviewEnabled(bool on)
@@ -237,15 +286,7 @@ void MainWindow::setPreviewEnabled(bool on)
     }
     m_previewOn = on;
     m_previewToggle->setText(m_previewOn ? QStringLiteral("预览:开") : QStringLiteral("预览:关"));
-    m_previewToggle->setStyleSheet(m_previewOn
-        ? QStringLiteral(
-              "QPushButton { color:#fff; background:#0F766E; padding:4px 14px; border:none; font-weight:600; }"
-              "QPushButton:hover { background:#0D9488; }"
-              "QPushButton:disabled { color:#64748B; }")
-        : QStringLiteral(
-              "QPushButton { color:#fff; background:#334155; padding:4px 14px; border:none; font-weight:600; }"
-              "QPushButton:hover { background:#475569; }"
-              "QPushButton:disabled { color:#64748B; }"));
+    m_previewToggle->setStyleSheet(m_previewOn ? btnStyle(true) : btnStyle(false));
     if (m_previewOn)
         refreshPreview();
     else
@@ -255,8 +296,8 @@ void MainWindow::setPreviewEnabled(bool on)
 void MainWindow::setBusyUi(bool busy)
 {
     m_title->setBusy(busy);
-    m_profileCombo->setEnabled(!busy);
     m_previewToggle->setEnabled(!busy);
+    m_bottom->setEnabled(!busy);
     for (QPushButton *b : m_tabs)
         b->setEnabled(!busy);
 }
@@ -316,7 +357,7 @@ void MainWindow::onInstallDriver()
     if (m_vdd->driverReady()) {
         m_title->setStatusHint(QStringLiteral("驱动安装完成"));
         QMessageBox::information(this, QStringLiteral("安装完成"),
-                                 QStringLiteral("已检测到 Parsec Virtual Display Adapter。\n可以点「应用」创建虚拟屏了。"));
+                                 QStringLiteral("已检测到 Parsec Virtual Display Adapter。\n可以点「添加显示」了。"));
         refreshGuide();
     } else {
         m_title->setStatusHint(QStringLiteral("安装结束，未检测到驱动"));
@@ -344,29 +385,55 @@ void MainWindow::refreshGuide()
                 ? QStringLiteral(
                       "1. 点下方打开下载页，安装 Parsec VDD\n"
                       "2. 装好后设备里应出现 Parsec Virtual Display Adapter\n"
-                      "3. 回到本程序，点顶栏「应用」")
+                      "3. 回到本程序，点「添加显示」")
                 : QStringLiteral(
                       "本程序已捆绑驱动安装包。\n"
                       "1. 点下方「安装捆绑驱动」（会弹 UAC）\n"
-                      "2. 装好后点顶栏「应用」创建虚拟屏\n"
+                      "2. 装好后点「添加显示」\n"
                       "（建议不要同时开官方 ParsecVDisplay）"),
             setup.isEmpty() ? QStringLiteral("打开驱动下载页") : QStringLiteral("安装捆绑驱动"),
             QStringLiteral("查看安装说明"));
         return;
     }
 
-    const QString profile = m_cfg.profileName.isEmpty() ? QStringLiteral("当前配置") : m_cfg.profileName;
-    QString body = QStringLiteral(
-                       "1. 上方下拉选择配置方案（当前：%1）\n"
-                       "2. 点顶栏「应用」创建虚拟屏（首次会弹 UAC）\n"
-                       "3. 点右上角「预览:开」查看画面\n"
-                       "\n需要改分辨率/增删屏：点「设置」→「保存方案」")
-                       .arg(profile);
+    if (m_vdd->trackedCount() == 0) {
+        if (!m_cfg.displays.isEmpty()) {
+            m_preview->setGuide(
+                QStringLiteral("方案已加载，尚未挂上虚拟屏"),
+                QStringLiteral(
+                    "当前方案「%1」含 %2 块屏。\n"
+                    "点下方应用即可按方案创建；也可清空后逐个「添加显示」。\n"
+                    "挂上后右键标签可改分辨率 / 刷新率 / 缩放 / 删除。")
+                    .arg(m_cfg.profileName.isEmpty() ? QStringLiteral("当前") : m_cfg.profileName)
+                    .arg(m_cfg.displays.size()),
+                QStringLiteral("应用方案"),
+                QStringLiteral("添加显示"));
+            return;
+        }
+        m_preview->setGuide(
+            QStringLiteral("先添加一块虚拟屏！"),
+            QStringLiteral(
+                "1. 点右下角「添加显示」立刻挂上一块虚拟屏\n"
+                "2. 在上方标签右键：改分辨率 / 刷新率 / 缩放 / 删除\n"
+                "3. 可用「方案…」保存、加载、删除配置；「投放窗口」把应用挪到虚拟屏\n"
+                "4. 打开「预览」查看虚拟屏画面"),
+            QStringLiteral("添加显示"),
+            QStringLiteral("打开预览"));
+        return;
+    }
+
+    const DisplaySpec &s = m_cfg.displays[qBound(0, m_tabIndex, m_cfg.displays.size() - 1)];
     m_preview->setGuide(
-        QStringLiteral("三步即可"),
-        body,
-        QStringLiteral("应用当前配置"),
-        QStringLiteral("打开预览"));
+        QStringLiteral("虚拟屏已就绪"),
+        QStringLiteral("当前：%1  %2×%3 @%4Hz  缩放%5%\n"
+                       "右键标签可改规格；点「预览」看画面；「投放窗口」移动应用。")
+            .arg(s.label)
+            .arg(s.width)
+            .arg(s.height)
+            .arg(s.hz)
+            .arg(s.scale),
+        QStringLiteral("打开预览"),
+        QStringLiteral("投放窗口"));
 }
 
 void MainWindow::onGuidePrimary()
@@ -376,9 +443,16 @@ void MainWindow::onGuidePrimary()
             onInstallDriver();
         else
             openDriverPage();
-    } else {
-        onApply();
+        return;
     }
+    if (m_vdd->trackedCount() == 0) {
+        if (!m_cfg.displays.isEmpty())
+            onApply();
+        else
+            onAddDisplay();
+        return;
+    }
+    setPreviewEnabled(true);
 }
 
 void MainWindow::onGuideSecondary()
@@ -387,7 +461,14 @@ void MainWindow::onGuideSecondary()
         QMessageBox::information(this, QStringLiteral("安装说明"), m_vdd->installDriverHint());
         return;
     }
-    setPreviewEnabled(true);
+    if (m_vdd->trackedCount() == 0) {
+        if (!m_cfg.displays.isEmpty())
+            onAddDisplay();
+        else
+            setPreviewEnabled(true);
+        return;
+    }
+    onPlaceWindow();
 }
 
 void MainWindow::rebuildTabs()
@@ -398,29 +479,35 @@ void MainWindow::rebuildTabs()
     }
     m_tabs.clear();
 
-    // 插在 stretch 之前：layout = 方案 | tabs… | stretch | 预览
-    const int insertAt = m_tabLay->count() - 2;
+    // stretch 在索引 0，预览按钮在末尾 → 插在 stretch 之后
     for (int i = 0; i < m_cfg.displays.size(); ++i) {
         const DisplaySpec &spec = m_cfg.displays[i];
         const QString text = spec.label.trimmed().isEmpty()
                                  ? QStringLiteral("虚拟屏%1").arg(i + 1)
                                  : spec.label.trimmed();
         auto *btn = new QPushButton(text, m_tabBar);
-        btn->setFlat(true);
         btn->setCursor(Qt::PointingHandCursor);
         btn->setEnabled(!m_busy);
+        btn->setContextMenuPolicy(Qt::CustomContextMenu);
         const bool active = (i == m_tabIndex);
         btn->setStyleSheet(active
-            ? QStringLiteral("QPushButton { color:#fff; background:#0F766E; padding:3px 12px; border:none; }")
-            : QStringLiteral("QPushButton { color:#94A3B8; background:transparent; padding:3px 12px; border:1px solid #334155; }"));
-        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz  缩放%5%")
+            ? QStringLiteral(
+                  "QPushButton { color:#fff; background:#0F766E; padding:4px 14px; border:none; }"
+                  "QPushButton:hover { background:#0D9488; }")
+            : QStringLiteral(
+                  "QPushButton { color:#CBD5E1; background:#1E293B; padding:4px 14px; border:1px solid #334155; }"
+                  "QPushButton:hover { background:#334155; }"));
+        btn->setToolTip(QStringLiteral("%1  %2×%3 @%4Hz  缩放%5%\n右键可改规格 / 删除")
                             .arg(text)
                             .arg(spec.width)
                             .arg(spec.height)
                             .arg(spec.hz)
                             .arg(spec.scale));
-        m_tabLay->insertWidget(insertAt + i, btn);
+        m_tabLay->insertWidget(i, btn);
         connect(btn, &QPushButton::clicked, this, [this, i]() { selectTab(i); });
+        connect(btn, &QWidget::customContextMenuRequested, this, [this, i, btn](const QPoint &p) {
+            showDisplayContextMenu(i, btn->mapToGlobal(p));
+        });
         m_tabs.push_back(btn);
     }
     if (m_tabIndex >= m_cfg.displays.size())
@@ -433,6 +520,8 @@ void MainWindow::selectTab(int index)
     rebuildTabs();
     if (m_previewOn)
         refreshPreview();
+    else
+        refreshGuide();
 }
 
 void MainWindow::togglePreview()
@@ -440,48 +529,154 @@ void MainWindow::togglePreview()
     setPreviewEnabled(!m_previewOn);
 }
 
-void MainWindow::toggleSettings()
+void MainWindow::showDisplayContextMenu(int index, const QPoint &globalPos)
 {
-    updateDriverUi();
-    m_settings->loadFrom(m_cfg);
-    m_settings->exec();
-    // 设置里可能改了规格但未保存；以磁盘/内存当前 cfg 为准刷新引导
-    refreshProfileCombo();
-    rebuildTabs();
-    if (!m_previewOn)
-        refreshGuide();
+    if (index < 0 || index >= m_cfg.displays.size())
+        return;
+    selectTab(index);
+    DisplaySpec spec = m_cfg.displays[index];
+
+    QMenu menu(this);
+    menu.setStyleSheet(QStringLiteral(
+        "QMenu { background:#111827; color:#E2E8F0; border:1px solid #334155; }"
+        "QMenu::item:selected { background:#0F766E; }"));
+
+    QMenu *res = menu.addMenu(QStringLiteral("分辨率"));
+    const QList<QPair<int, int>> presets = {
+        {1920, 1080}, {1920, 1200}, {2560, 1440}, {3840, 2160},
+        {1280, 720}, {1366, 768}, {1600, 900}, {1680, 1050},
+    };
+    for (const auto &wh : presets) {
+        auto *a = res->addAction(QStringLiteral("%1 × %2").arg(wh.first).arg(wh.second));
+        connect(a, &QAction::triggered, this, [this, index, wh]() {
+            DisplaySpec s = m_cfg.displays[index];
+            s.width = wh.first;
+            s.height = wh.second;
+            updateDisplayAt(index, s);
+        });
+    }
+    res->addSeparator();
+    connect(res->addAction(QStringLiteral("自定义…")), &QAction::triggered, this, [this, index]() {
+        DisplaySpec s = m_cfg.displays[index];
+        bool ok = false;
+        const int w = QInputDialog::getInt(this, QStringLiteral("宽度"), QStringLiteral("像素宽"),
+                                           s.width, 640, 7680, 8, &ok);
+        if (!ok)
+            return;
+        const int h = QInputDialog::getInt(this, QStringLiteral("高度"), QStringLiteral("像素高"),
+                                           s.height, 480, 4320, 8, &ok);
+        if (!ok)
+            return;
+        s.width = w;
+        s.height = h;
+        updateDisplayAt(index, s);
+    });
+
+    QMenu *hz = menu.addMenu(QStringLiteral("刷新率"));
+    for (int v : {30, 60, 90, 120, 144}) {
+        auto *a = hz->addAction(QStringLiteral("%1 Hz").arg(v));
+        connect(a, &QAction::triggered, this, [this, index, v]() {
+            DisplaySpec s = m_cfg.displays[index];
+            s.hz = v;
+            updateDisplayAt(index, s);
+        });
+    }
+
+    QMenu *scale = menu.addMenu(QStringLiteral("缩放"));
+    for (int v : {100, 125, 150, 175, 200}) {
+        auto *a = scale->addAction(QStringLiteral("%1%").arg(v));
+        connect(a, &QAction::triggered, this, [this, index, v]() {
+            DisplaySpec s = m_cfg.displays[index];
+            s.scale = v;
+            updateDisplayAt(index, s);
+        });
+    }
+
+    menu.addSeparator();
+    connect(menu.addAction(QStringLiteral("投放窗口到此屏…")), &QAction::triggered, this, [this]() {
+        onPlaceWindow();
+    });
+    menu.addSeparator();
+    connect(menu.addAction(QStringLiteral("删除此虚拟屏")), &QAction::triggered, this, [this, index]() {
+        if (QMessageBox::question(this, QStringLiteral("删除"),
+                                  QStringLiteral("删除「%1」？").arg(m_cfg.displays[index].label))
+            != QMessageBox::Yes)
+            return;
+        removeDisplayAt(index);
+    });
+
+    menu.exec(globalPos);
 }
 
-void MainWindow::onSaveSettings()
+void MainWindow::showProfileMenu()
 {
-    AppConfig c = m_settings->toConfig(m_cfg);
-    const QStringList errs = c.validate();
-    if (!errs.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
+    QMenu menu(this);
+    menu.setStyleSheet(QStringLiteral(
+        "QMenu { background:#111827; color:#E2E8F0; border:1px solid #334155; }"
+        "QMenu::item:selected { background:#0F766E; }"));
+    connect(menu.addAction(QStringLiteral("保存当前方案")), &QAction::triggered,
+            this, &MainWindow::onSaveProfile);
+    connect(menu.addAction(QStringLiteral("另存为…")), &QAction::triggered,
+            this, &MainWindow::onSaveProfileAs);
+
+    QMenu *load = menu.addMenu(QStringLiteral("加载方案"));
+    const QStringList paths = listProfilePaths();
+    if (paths.isEmpty()) {
+        auto *empty = load->addAction(QStringLiteral("（暂无已存方案）"));
+        empty->setEnabled(false);
+    } else {
+        for (const QString &p : paths) {
+            auto *a = load->addAction(QFileInfo(p).completeBaseName());
+            connect(a, &QAction::triggered, this, [this, p]() { onLoadProfile(p); });
+        }
+    }
+    connect(menu.addAction(QStringLiteral("浏览加载…")), &QAction::triggered, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("加载配置"), profilesDir(), QStringLiteral("配置 (*.json)"));
+        if (!path.isEmpty())
+            onLoadProfile(path);
+    });
+
+    QMenu *del = menu.addMenu(QStringLiteral("删除方案"));
+    if (paths.isEmpty()) {
+        auto *empty = del->addAction(QStringLiteral("（暂无）"));
+        empty->setEnabled(false);
+    } else {
+        for (const QString &p : paths) {
+            auto *a = del->addAction(QFileInfo(p).completeBaseName());
+            connect(a, &QAction::triggered, this, [this, p]() { onDeleteProfile(p); });
+        }
+    }
+    menu.exec(QCursor::pos());
+}
+
+void MainWindow::onSaveProfile()
+{
+    if (m_cfg.profileName.isEmpty()) {
+        onSaveProfileAs();
         return;
     }
-    c.profileName = m_cfg.profileName.isEmpty() ? QStringLiteral("当前") : m_cfg.profileName;
-    c.save();
-    m_cfg = c;
-    m_settings->setProfileHint(m_cfg.profileName);
-    refreshProfileCombo();
-    rebuildTabs();
-    m_title->setStatusHint(QStringLiteral("方案已保存 · 点顶栏「应用」生效"));
-    if (!m_previewOn)
-        refreshGuide();
+    const QString path = QDir(profilesDir()).filePath(m_cfg.profileName + QStringLiteral(".json"));
+    QString err;
+    if (!m_cfg.saveToFile(path, &err)) {
+        QMessageBox::warning(this, QStringLiteral("保存失败"), err);
+        return;
+    }
+    persistCfg();
+    m_title->setStatusHint(QStringLiteral("已保存方案「%1」").arg(m_cfg.profileName));
 }
 
-void MainWindow::onSaveAsSettings()
+void MainWindow::onSaveProfileAs()
 {
-    AppConfig c = m_settings->toConfig(m_cfg);
+    AppConfig c = m_settings->isVisible() ? m_settings->toConfig(m_cfg) : m_cfg;
     const QStringList errs = c.validate();
-    if (!errs.isEmpty()) {
+    if (!errs.isEmpty() && !c.displays.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
         return;
     }
     const QString path = QFileDialog::getSaveFileName(
-        m_settings,
-        QStringLiteral("另存配置"),
+        this,
+        QStringLiteral("另存方案"),
         QDir(profilesDir()).filePath(QStringLiteral("project.json")),
         QStringLiteral("配置 (*.json)"));
     if (path.isEmpty())
@@ -492,14 +687,10 @@ void MainWindow::onSaveAsSettings()
         QMessageBox::warning(this, QStringLiteral("保存失败"), err);
         return;
     }
-    c.save();
     m_cfg = c;
-    m_settings->loadFrom(m_cfg);
-    refreshProfileCombo();
+    persistCfg();
     rebuildTabs();
-    m_title->setStatusHint(QStringLiteral("已另存: %1 · 点「应用」生效").arg(c.profileName));
-    if (!m_previewOn)
-        refreshGuide();
+    m_title->setStatusHint(QStringLiteral("已另存「%1」").arg(c.profileName));
 }
 
 void MainWindow::onLoadProfile(const QString &path)
@@ -508,30 +699,199 @@ void MainWindow::onLoadProfile(const QString &path)
         return;
     QString err;
     AppConfig c = AppConfig::loadFromFile(path, &err);
+    if (!err.isEmpty() && c.displays.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("加载失败"), err);
+        return;
+    }
     const QStringList errs = c.validate();
     if (!errs.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("配置无效"), errs.join(QLatin1Char('\n')));
         return;
     }
-    c.save();
     m_cfg = c;
-    m_settings->loadFrom(m_cfg);
-    refreshProfileCombo();
+    persistCfg();
     rebuildTabs();
-    m_title->setStatusHint(QStringLiteral("已加载: %1 · 点「应用」生效").arg(m_cfg.profileName));
+    m_title->setStatusHint(QStringLiteral("已加载「%1」").arg(m_cfg.profileName));
+    if (QMessageBox::question(this, QStringLiteral("应用方案"),
+                              QStringLiteral("是否立即按「%1」重建虚拟屏？").arg(m_cfg.profileName))
+        == QMessageBox::Yes)
+        onApply();
+    else
+        refreshGuide();
+}
+
+void MainWindow::onDeleteProfile(const QString &path)
+{
+    if (QMessageBox::question(this, QStringLiteral("删除方案"),
+                              QStringLiteral("删除「%1」？\n不会影响当前已挂上的虚拟屏。")
+                                  .arg(QFileInfo(path).completeBaseName()))
+        != QMessageBox::Yes)
+        return;
+    QString err;
+    if (!deleteProfileFile(path, &err)) {
+        QMessageBox::warning(this, QStringLiteral("删除失败"), err);
+        return;
+    }
+    m_title->setStatusHint(QStringLiteral("已删除方案「%1」").arg(QFileInfo(path).completeBaseName()));
+}
+
+void MainWindow::onCustomDialog()
+{
+    updateDriverUi();
+    m_settings->loadFrom(m_cfg);
+    m_settings->exec();
+    rebuildTabs();
     if (!m_previewOn)
         refreshGuide();
 }
 
-void MainWindow::onBrowseLoadSettings()
+void MainWindow::onRefreshDisplays()
 {
-    const QString path = QFileDialog::getOpenFileName(
-        m_settings,
-        QStringLiteral("加载配置"),
-        profilesDir(),
-        QStringLiteral("配置 (*.json)"));
-    if (!path.isEmpty())
-        onLoadProfile(path);
+    rebuildTabs();
+    if (m_previewOn)
+        refreshPreview();
+    else
+        refreshGuide();
+    m_title->setStatusHint(QStringLiteral("已刷新 · 虚拟屏 %1 / 配置 %2")
+                               .arg(m_vdd->trackedCount())
+                               .arg(m_cfg.displays.size()));
+}
+
+void MainWindow::onAddDisplay()
+{
+    if (!m_vdd->driverReady()) {
+        const auto ans = QMessageBox::question(
+            this, QStringLiteral("缺少驱动"),
+            m_vdd->installDriverHint() + QStringLiteral("\n\n是否安装/打开驱动页？"));
+        if (ans == QMessageBox::Yes)
+            openDriverPage();
+        refreshGuide();
+        return;
+    }
+    DisplaySpec spec = defaultSpec(m_cfg.displays.size() + 1);
+    addDisplaySpec(spec);
+}
+
+void MainWindow::addDisplaySpec(const DisplaySpec &spec)
+{
+    DisplaySpec s = spec;
+    if (s.label.trimmed().isEmpty())
+        s.label = QStringLiteral("虚拟屏%1").arg(m_cfg.displays.size() + 1);
+
+    if (!Elevate::isAdmin()) {
+        m_cfg.displays.push_back(s);
+        persistCfg();
+        ensureAdminFor(QStringLiteral("添加显示"), {QStringLiteral("--apply")});
+        return;
+    }
+
+    m_pendingSpec = s;
+    m_pendingIndex = m_cfg.displays.size();
+    runBg([this, s]() { return m_vdd->addOne(s); }, QStringLiteral("添加"));
+}
+
+bool MainWindow::ensureAdminFor(const QString &action, const QStringList &args)
+{
+    if (Elevate::isAdmin())
+        return true;
+    if (!confirmElevate(action))
+        return false;
+    persistCfg();
+    if (!Elevate::relaunchAsAdmin(args))
+        QMessageBox::warning(this, QStringLiteral("提权"), QStringLiteral("无法弹出 UAC，或已取消。"));
+    else
+        close();
+    return false;
+}
+
+void MainWindow::removeDisplayAt(int index)
+{
+    if (index < 0 || index >= m_cfg.displays.size())
+        return;
+    if (!Elevate::isAdmin()) {
+        m_cfg.displays.removeAt(index);
+        persistCfg();
+        ensureAdminFor(QStringLiteral("删除虚拟屏"), {QStringLiteral("--apply")});
+        return;
+    }
+    m_pendingIndex = index;
+    const int tracked = m_vdd->trackedCount();
+    runBg([this, index, tracked]() {
+        if (index < tracked)
+            return m_vdd->removeAt(index);
+        return QStringLiteral("已删除（仅配置）。");
+    }, QStringLiteral("删除"));
+}
+
+void MainWindow::updateDisplayAt(int index, const DisplaySpec &spec)
+{
+    if (index < 0 || index >= m_cfg.displays.size())
+        return;
+    if (!Elevate::isAdmin()) {
+        m_cfg.displays[index] = spec;
+        persistCfg();
+        ensureAdminFor(QStringLiteral("修改虚拟屏"), {QStringLiteral("--apply")});
+        return;
+    }
+    m_pendingSpec = spec;
+    m_pendingIndex = index;
+    QVector<DisplaySpec> all = m_cfg.displays;
+    all[index] = spec;
+    runBg([this, index, spec, all]() {
+        if (index < m_vdd->trackedCount())
+            return m_vdd->updateAt(index, spec, all);
+        return QStringLiteral("已更新配置（驱动侧尚未挂上该屏，请先添加）。");
+    }, QStringLiteral("更新"));
+}
+
+void MainWindow::onPlaceWindow()
+{
+    if (m_cfg.displays.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("投放窗口"),
+                                 QStringLiteral("请先添加虚拟屏。"));
+        return;
+    }
+    const QVector<MonitorInfo> virtuals = matchedVirtuals();
+    m_tabIndex = qBound(0, m_tabIndex, m_cfg.displays.size() - 1);
+    if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("投放窗口"),
+                             QStringLiteral("当前选中的虚拟屏尚未出现在系统显示器列表中。\n"
+                                            "请先「添加显示」或加载方案并应用。"));
+        return;
+    }
+    const MonitorInfo mon = virtuals[m_tabIndex];
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("投放窗口到「%1」").arg(m_cfg.displays[m_tabIndex].label));
+    dlg.resize(520, 420);
+    auto *lay = new QVBoxLayout(&dlg);
+    lay->addWidget(new QLabel(QStringLiteral("选择要移动的顶层窗口："), &dlg));
+    auto *list = new QListWidget(&dlg);
+    const QVector<TopWindowInfo> wins = WinDisplay::listTopWindows();
+    for (const TopWindowInfo &w : wins) {
+        const QString text = w.processName.isEmpty()
+                                 ? w.title
+                                 : QStringLiteral("%1  —  %2").arg(w.processName, w.title);
+        auto *item = new QListWidgetItem(text, list);
+        item->setData(Qt::UserRole, QVariant::fromValue(w.hwnd));
+    }
+    lay->addWidget(list, 1);
+    auto *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    lay->addWidget(box);
+    connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(list, &QListWidget::itemDoubleClicked, &dlg, &QDialog::accept);
+    if (dlg.exec() != QDialog::Accepted || !list->currentItem())
+        return;
+    const qulonglong hwnd = list->currentItem()->data(Qt::UserRole).toULongLong();
+    if (!WinDisplay::moveWindowToMonitor(hwnd, mon.geometry)) {
+        QMessageBox::warning(this, QStringLiteral("投放失败"),
+                             QStringLiteral("无法移动该窗口（可能已关闭或权限不足）。"));
+        return;
+    }
+    m_title->setStatusHint(QStringLiteral("已投放窗口到「%1」").arg(m_cfg.displays[m_tabIndex].label));
+    if (m_previewOn)
+        QTimer::singleShot(400, this, &MainWindow::refreshPreview);
 }
 
 bool MainWindow::confirmElevate(const QString &action)
@@ -550,9 +910,12 @@ bool MainWindow::confirmElevate(const QString &action)
 
 static bool looksSuccess(const QString &title, const QString &msg)
 {
-    if (title == QStringLiteral("应用"))
+    if (title == QStringLiteral("应用") || title == QStringLiteral("添加")
+        || title == QStringLiteral("更新") || title == QStringLiteral("删除"))
         return msg.startsWith(QStringLiteral("已应用"))
-            || msg.startsWith(QStringLiteral("已更新"));
+            || msg.startsWith(QStringLiteral("已更新"))
+            || msg.startsWith(QStringLiteral("已添加"))
+            || msg.startsWith(QStringLiteral("已删除"));
     if (title == QStringLiteral("清除"))
         return msg.startsWith(QStringLiteral("已请求禁用"))
             || msg.contains(QStringLiteral("未找到 Parsec"))
@@ -593,28 +956,49 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
             m_busy = false;
             setBusyUi(false);
             m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0));
-            rebuildTabs();
-            updateDriverUi();
             if (!ok) {
                 QMessageBox::warning(this, title, msg);
+                setPreviewEnabled(false);
+                rebuildTabs();
+                refreshGuide();
+                return;
+            }
+
+            if (title == QStringLiteral("添加")) {
+                m_cfg.displays.push_back(m_pendingSpec);
+                m_tabIndex = m_cfg.displays.size() - 1;
+            } else if (title == QStringLiteral("删除") && m_pendingIndex >= 0
+                       && m_pendingIndex < m_cfg.displays.size()) {
+                m_cfg.displays.removeAt(m_pendingIndex);
+                if (m_tabIndex >= m_cfg.displays.size())
+                    m_tabIndex = qMax(0, m_cfg.displays.size() - 1);
+            } else if (title == QStringLiteral("更新") && m_pendingIndex >= 0
+                       && m_pendingIndex < m_cfg.displays.size()) {
+                m_cfg.displays[m_pendingIndex] = m_pendingSpec;
+            } else if (title == QStringLiteral("清除")) {
+                m_cfg.displays.clear();
+                m_tabIndex = 0;
+            } else if (title == QStringLiteral("应用")) {
+                // m_cfg 已是目标方案；tracked 由 applyConfig 重建
+            }
+
+            persistCfg();
+            rebuildTabs();
+            updateDriverUi();
+            if (msg.contains(QStringLiteral("警告")))
+                QMessageBox::warning(this, title, msg);
+
+            if (title == QStringLiteral("清除") || m_cfg.displays.isEmpty()) {
                 setPreviewEnabled(false);
                 refreshGuide();
                 return;
             }
-            if (msg.contains(QStringLiteral("警告")))
-                QMessageBox::warning(this, title, msg);
 
-            if (title == QStringLiteral("应用")) {
-                // 系统枚举虚拟屏常有延迟，先开预览再短轮询，避免误报「未上线」
-                setPreviewEnabled(true);
-                m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0)
-                                       + QStringLiteral(" · 预览已打开"));
-                QTimer::singleShot(800, this, &MainWindow::refreshPreview);
-                QTimer::singleShot(2000, this, &MainWindow::refreshPreview);
-            } else {
-                setPreviewEnabled(false);
-                refreshGuide();
-            }
+            setPreviewEnabled(true);
+            m_title->setStatusHint(msg.split(QLatin1Char('\n')).value(0)
+                                   + QStringLiteral(" · 预览已打开"));
+            QTimer::singleShot(800, this, &MainWindow::refreshPreview);
+            QTimer::singleShot(2000, this, &MainWindow::refreshPreview);
         }, Qt::QueuedConnection);
     });
     connect(th, &QThread::finished, th, &QObject::deleteLater);
@@ -623,26 +1007,21 @@ void MainWindow::runBg(const std::function<QString()> &work, const QString &titl
 
 void MainWindow::onApply()
 {
-    AppConfig c = m_settings->isVisible() ? m_settings->toConfig(m_cfg) : m_cfg;
-    const QStringList errs = c.validate();
+    const QStringList errs = m_cfg.validate();
     if (!errs.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("配置错误"), errs.join(QLatin1Char('\n')));
         return;
     }
     if (!m_vdd->driverReady()) {
         const auto ans = QMessageBox::question(
-            this,
-            QStringLiteral("缺少驱动"),
+            this, QStringLiteral("缺少驱动"),
             m_vdd->installDriverHint() + QStringLiteral("\n\n是否打开驱动下载页？"));
         if (ans == QMessageBox::Yes)
             openDriverPage();
         refreshGuide();
         return;
     }
-    c.save();
-    m_cfg = c;
-    rebuildTabs();
-
+    persistCfg();
     if (!Elevate::isAdmin()) {
         if (!confirmElevate(QStringLiteral("应用")))
             return;
@@ -653,13 +1032,14 @@ void MainWindow::onApply()
         return;
     }
 
+    const AppConfig c = m_cfg;
     runBg([this, c]() { return m_vdd->applyConfig(c); }, QStringLiteral("应用"));
 }
 
 void MainWindow::onClear()
 {
-    if (QMessageBox::question(this, QStringLiteral("清除"),
-                              QStringLiteral("禁用虚拟显示驱动？\n清除后虚拟屏应从系统消失，桌面卡顿通常会缓解。"))
+    if (QMessageBox::question(this, QStringLiteral("清除全部"),
+                              QStringLiteral("移除所有虚拟屏？"))
         != QMessageBox::Yes)
         return;
     if (!Elevate::isAdmin()) {
@@ -671,9 +1051,7 @@ void MainWindow::onClear()
             close();
         return;
     }
-    runBg([this]() {
-        return m_vdd->clearVirtualDisplays();
-    }, QStringLiteral("清除"));
+    runBg([this]() { return m_vdd->clearVirtualDisplays(); }, QStringLiteral("清除"));
 }
 
 QVector<MonitorInfo> MainWindow::matchedVirtuals() const
@@ -720,7 +1098,7 @@ void MainWindow::refreshPreview()
         return;
 
     if (m_cfg.displays.isEmpty()) {
-        m_preview->setPlaceholder(QStringLiteral("当前配置没有虚拟屏"));
+        m_preview->setPlaceholder(QStringLiteral("还没有虚拟屏 · 点「添加显示」"));
         return;
     }
     if (m_tabs.size() != m_cfg.displays.size())
@@ -731,11 +1109,9 @@ void MainWindow::refreshPreview()
     const DisplaySpec &spec = m_cfg.displays[m_tabIndex];
     const QString label = spec.label;
     if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
-        // 配置可能已写入，但 Windows 桌面尚未挂上该屏（与「没点应用」不是一回事）
         m_preview->setPlaceholder(
             QStringLiteral("「%1」未出现在系统显示器列表中\n"
-                           "可再点顶栏「应用」；仍没有则到 Windows「显示设置」看是否多出显示器\n"
-                           "（当前机器上活跃显示器里还没有这块虚拟屏）")
+                           "请点「添加显示」或加载方案后应用")
                 .arg(label));
         m_title->setStatusHint(QStringLiteral("%1 · 系统未挂上").arg(label));
         return;

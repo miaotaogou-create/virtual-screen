@@ -30,3 +30,4 @@ struct AppConfig {
 QString configPath();
 QString profilesDir();
 QStringList listProfilePaths();
+bool deleteProfileFile(const QString &path, QString *error = nullptr);

@@ -17,12 +17,7 @@ TitleBar::TitleBar(QWidget *parent)
         "QLabel { color:#fff; background:transparent; }"
         "QPushButton { background:transparent; color:#ECFDF5; border:none; padding:0 10px; }"
         "QPushButton:hover { background:#0D9488; }"
-        "QPushButton:disabled { color:#99F6E4; }"
-        "QPushButton#primaryBtn {"
-        "  background:#115E59; color:#fff; font-weight:600; padding:0 12px;"
-        "}"
-        "QPushButton#primaryBtn:hover { background:#134E4A; }"
-        "QPushButton#primaryBtn:disabled { background:#0F766E; color:#99F6E4; }"));
+        "QPushButton:disabled { color:#99F6E4; }"));
 
     auto *lay = new QHBoxLayout(this);
     lay->setContentsMargins(10, 0, 0, 0);
@@ -33,12 +28,8 @@ TitleBar::TitleBar(QWidget *parent)
     m_hint = new QLabel(this);
     m_hint->setStyleSheet(QStringLiteral("color:#CCFBF1; font-size:11px;"));
 
-    m_apply = new QPushButton(QStringLiteral("应用"), this);
-    m_apply->setObjectName(QStringLiteral("primaryBtn"));
-    m_apply->setToolTip(QStringLiteral("按当前配置创建/更新虚拟屏"));
-    m_clear = new QPushButton(QStringLiteral("清除"), this);
-    m_clear->setToolTip(QStringLiteral("禁用虚拟显示驱动"));
-    m_settings = new QPushButton(QStringLiteral("设置"), this);
+    m_clear = new QPushButton(QStringLiteral("清除全部"), this);
+    m_clear->setToolTip(QStringLiteral("移除所有虚拟屏"));
 
     auto *sep = new QFrame(this);
     sep->setFrameShape(QFrame::VLine);
@@ -54,17 +45,13 @@ TitleBar::TitleBar(QWidget *parent)
 
     lay->addWidget(m_title);
     lay->addWidget(m_hint, 1);
-    lay->addWidget(m_apply);
     lay->addWidget(m_clear);
-    lay->addWidget(m_settings);
     lay->addWidget(sep);
     lay->addWidget(minBtn);
     lay->addWidget(m_maxBtn);
     lay->addWidget(closeBtn);
 
-    connect(m_apply, &QPushButton::clicked, this, &TitleBar::applyClicked);
     connect(m_clear, &QPushButton::clicked, this, &TitleBar::clearClicked);
-    connect(m_settings, &QPushButton::clicked, this, &TitleBar::settingsClicked);
     connect(closeBtn, &QAbstractButton::clicked, this, &TitleBar::closeClicked);
     connect(minBtn, &QAbstractButton::clicked, this, [this]() {
         if (window())
@@ -75,9 +62,7 @@ TitleBar::TitleBar(QWidget *parent)
 
 void TitleBar::setBusy(bool busy)
 {
-    m_apply->setEnabled(!busy);
     m_clear->setEnabled(!busy);
-    m_settings->setEnabled(!busy);
 }
 
 void TitleBar::toggleMaxRestore()

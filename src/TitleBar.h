@@ -6,7 +6,7 @@ class QLabel;
 class QPushButton;
 class ChromeButton;
 
-/** 窄标题栏：高度约 28px；含最小化 / 最大化(还原) / 关闭。 */
+/** 窄标题栏：状态 + 清除全部 + 窗口按钮。 */
 class TitleBar : public QWidget
 {
     Q_OBJECT
@@ -16,9 +16,7 @@ public:
     void setBusy(bool busy);
 
 signals:
-    void applyClicked();
     void clearClicked();
-    void settingsClicked();
     void closeClicked();
 
 public slots:
@@ -35,9 +33,7 @@ private:
 
     QLabel *m_title = nullptr;
     QLabel *m_hint = nullptr;
-    QPushButton *m_apply = nullptr;
     QPushButton *m_clear = nullptr;
-    QPushButton *m_settings = nullptr;
     ChromeButton *m_maxBtn = nullptr;
     QPoint m_dragPos;
     bool m_dragging = false;

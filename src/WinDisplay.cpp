@@ -1,5 +1,6 @@
 #include "WinDisplay.h"
 
+#include <QFileInfo>
 #include <QHash>
 #include <QImage>
 #include <algorithm>
@@ -308,6 +309,77 @@ QImage captureDesktopRect(const QRect &geo)
     ReleaseDC(nullptr, screen);
     // GDI 是 BGRA；Qt ARGB32 在小端同布局，可直接用
     return img;
+}
+
+QVector<TopWindowInfo> listTopWindows()
+{
+    QVector<TopWindowInfo> out;
+    struct Ctx {
+        QVector<TopWindowInfo> *out;
+    } ctx{&out};
+
+    auto proc = [](HWND hwnd, LPARAM lp) -> BOOL {
+        auto *c = reinterpret_cast<Ctx *>(lp);
+        if (!IsWindowVisible(hwnd))
+            return TRUE;
+        if (GetWindow(hwnd, GW_OWNER))
+            return TRUE;
+        const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        if (!(style & WS_VISIBLE))
+            return TRUE;
+        wchar_t title[512];
+        const int n = GetWindowTextW(hwnd, title, 512);
+        if (n <= 0)
+            return TRUE;
+        // 跳过工具窗 / 无标题
+        const LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if (ex & WS_EX_TOOLWINDOW)
+            return TRUE;
+
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        QString procName;
+        if (pid) {
+            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if (h) {
+                wchar_t path[MAX_PATH];
+                DWORD size = MAX_PATH;
+                if (QueryFullProcessImageNameW(h, 0, path, &size))
+                    procName = QFileInfo(QString::fromWCharArray(path)).fileName();
+                CloseHandle(h);
+            }
+        }
+        const QString t = QString::fromWCharArray(title);
+        if (t.contains(QStringLiteral("VirtualScreen")))
+            return TRUE;
+
+        TopWindowInfo info;
+        info.hwnd = reinterpret_cast<qulonglong>(hwnd);
+        info.title = t;
+        info.processName = procName;
+        c->out->push_back(info);
+        return TRUE;
+    };
+
+    EnumWindows(proc, reinterpret_cast<LPARAM>(&ctx));
+    return out;
+}
+
+bool moveWindowToMonitor(qulonglong hwndVal, const QRect &monitorGeo)
+{
+    HWND hwnd = reinterpret_cast<HWND>(hwndVal);
+    if (!hwnd || !IsWindow(hwnd))
+        return false;
+    ShowWindow(hwnd, SW_RESTORE);
+    // 留一点边距，避免贴边被当成最大化异常
+    const int x = monitorGeo.x() + 8;
+    const int y = monitorGeo.y() + 8;
+    const int w = qMax(320, monitorGeo.width() - 16);
+    const int h = qMax(240, monitorGeo.height() - 16);
+    const BOOL ok = SetWindowPos(hwnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW);
+    if (ok)
+        ShowWindow(hwnd, SW_MAXIMIZE);
+    return ok == TRUE;
 }
 
 } // namespace WinDisplay

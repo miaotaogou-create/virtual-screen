@@ -29,6 +29,21 @@ QStringList listProfilePaths()
     return out;
 }
 
+bool deleteProfileFile(const QString &path, QString *error)
+{
+    if (path.isEmpty() || !QFile::exists(path)) {
+        if (error)
+            *error = QStringLiteral("文件不存在");
+        return false;
+    }
+    if (!QFile::remove(path)) {
+        if (error)
+            *error = QStringLiteral("无法删除: %1").arg(path);
+        return false;
+    }
+    return true;
+}
+
 static AppConfig parseObject(const QJsonObject &o)
 {
     AppConfig c = AppConfig::defaults();
