@@ -77,6 +77,4 @@ private:
     DisplaySpec m_pendingSpec;
     int m_pendingIndex = -1;
     QRect m_previewGeo;
-    QPoint m_savedCursor;
-    bool m_cursorSaved = false;
 };

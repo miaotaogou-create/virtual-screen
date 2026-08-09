@@ -272,16 +272,30 @@ bool setDpiScale(const QString &deviceName, int scalePercent)
 
 QImage captureDesktopRect(const QRect &geo)
 {
+    return captureDesktopRect(geo, QSize());
+}
+
+QImage captureDesktopRect(const QRect &geo, const QSize &maxSize)
+{
     if (geo.width() < 1 || geo.height() < 1)
         return {};
 
-    const int w = geo.width();
-    const int h = geo.height();
+    const int srcW = geo.width();
+    const int srcH = geo.height();
+    int dstW = srcW;
+    int dstH = srcH;
+    if (maxSize.width() > 1 && maxSize.height() > 1
+        && (srcW > maxSize.width() || srcH > maxSize.height())) {
+        const QSize fitted = QSize(srcW, srcH).scaled(maxSize, Qt::KeepAspectRatio);
+        dstW = fitted.width();
+        dstH = fitted.height();
+    }
+
     HDC screen = GetDC(nullptr);
     if (!screen)
         return {};
     HDC mem = CreateCompatibleDC(screen);
-    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
+    HBITMAP bmp = CreateCompatibleBitmap(screen, dstW, dstH);
     if (!mem || !bmp) {
         if (bmp)
             DeleteObject(bmp);
@@ -291,24 +305,28 @@ QImage captureDesktopRect(const QRect &geo)
         return {};
     }
     HGDIOBJ old = SelectObject(mem, bmp);
-    BitBlt(mem, 0, 0, w, h, screen, geo.x(), geo.y(), SRCCOPY | CAPTUREBLT);
+    if (dstW == srcW && dstH == srcH) {
+        BitBlt(mem, 0, 0, dstW, dstH, screen, geo.x(), geo.y(), SRCCOPY | CAPTUREBLT);
+    } else {
+        SetStretchBltMode(mem, COLORONCOLOR);
+        StretchBlt(mem, 0, 0, dstW, dstH, screen, geo.x(), geo.y(), srcW, srcH, SRCCOPY | CAPTUREBLT);
+    }
     SelectObject(mem, old);
 
     BITMAPINFOHEADER bi{};
     bi.biSize = sizeof(bi);
-    bi.biWidth = w;
-    bi.biHeight = -h; // top-down
+    bi.biWidth = dstW;
+    bi.biHeight = -dstH;
     bi.biPlanes = 1;
     bi.biBitCount = 32;
     bi.biCompression = BI_RGB;
 
-    QImage img(w, h, QImage::Format_ARGB32);
-    GetDIBits(screen, bmp, 0, UINT(h), img.bits(), reinterpret_cast<BITMAPINFO *>(&bi), DIB_RGB_COLORS);
+    QImage img(dstW, dstH, QImage::Format_ARGB32);
+    GetDIBits(screen, bmp, 0, UINT(dstH), img.bits(), reinterpret_cast<BITMAPINFO *>(&bi), DIB_RGB_COLORS);
 
     DeleteObject(bmp);
     DeleteDC(mem);
     ReleaseDC(nullptr, screen);
-    // GDI 是 BGRA；Qt ARGB32 在小端同布局，可直接用
     return img;
 }
 
@@ -402,6 +420,10 @@ bool sendMouseAt(int desktopX, int desktopY, Qt::MouseButton button, bool presse
     if (vw <= 1 || vh <= 1)
         return false;
 
+    // 注入后立刻把光标拉回，系统指针不留在虚拟屏上；预览里靠软光标显示位置
+    POINT old{};
+    GetCursorPos(&old);
+
     INPUT in{};
     in.type = INPUT_MOUSE;
     in.mi.dx = toAbsoluteX(desktopX, vx, vw);
@@ -411,7 +433,9 @@ bool sendMouseAt(int desktopX, int desktopY, Qt::MouseButton button, bool presse
     if (wheelDelta != 0) {
         in.mi.dwFlags |= MOUSEEVENTF_WHEEL;
         in.mi.mouseData = DWORD(wheelDelta);
-        return SendInput(1, &in, sizeof(INPUT)) == 1;
+        const UINT n = SendInput(1, &in, sizeof(INPUT));
+        SetCursorPos(old.x, old.y);
+        return n == 1;
     }
 
     if (button == Qt::LeftButton)
@@ -420,9 +444,10 @@ bool sendMouseAt(int desktopX, int desktopY, Qt::MouseButton button, bool presse
         in.mi.dwFlags |= pressed ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
     else if (button == Qt::MiddleButton)
         in.mi.dwFlags |= pressed ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-    // NoButton：仅移动
 
-    return SendInput(1, &in, sizeof(INPUT)) == 1;
+    const UINT n = SendInput(1, &in, sizeof(INPUT));
+    SetCursorPos(old.x, old.y);
+    return n == 1;
 }
 
 static WORD vkFromQtKey(int key)

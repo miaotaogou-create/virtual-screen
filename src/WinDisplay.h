@@ -30,6 +30,8 @@ bool setMode(const QString &deviceName, int width, int height, int hz, int x, in
 bool applyDisplayChanges();
 bool setDpiScale(const QString &deviceName, int scalePercent);
 QImage captureDesktopRect(const QRect &geo);
+/** 直接缩放到 maxSize 内（预览用，更快）。 */
+QImage captureDesktopRect(const QRect &geo, const QSize &maxSize);
 
 /** 枚举可见顶层窗口（投放用）。 */
 QVector<TopWindowInfo> listTopWindows();

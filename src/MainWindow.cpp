@@ -126,6 +126,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::onAddDisplay);
     connect(m_preview, &PreviewPane::pointerEvent, this, &MainWindow::onPreviewPointer);
     connect(m_preview, &PreviewPane::keyEvent, this, &MainWindow::onPreviewKey);
+    connect(m_preview, &PreviewPane::hotChanged, this, [this](bool hot) {
+        m_timer->setInterval(hot ? 100 : qMax(400, m_cfg.previewIntervalMs));
+        if (hot)
+            refreshPreview();
+    });
     connect(m_vdd, &VddService::progress, this, [this](const QString &m) {
         m_title->setStatusHint(m);
     });
@@ -153,7 +158,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_timer = new QTimer(this);
     connect(m_timer, &QTimer::timeout, this, &MainWindow::refreshPreview);
-    m_timer->start(qMax(800, m_cfg.previewIntervalMs));
+    m_timer->start(qMax(400, m_cfg.previewIntervalMs));
 
     rebuildTabs();
     if (m_vdd->driverReady()) {
@@ -896,11 +901,8 @@ void MainWindow::refreshPreview()
 
     m_grabBusy = true;
     auto *th = QThread::create([this, mon, target, label, tab]() {
-        QImage img = WinDisplay::captureDesktopRect(mon.geometry);
-        if (!img.isNull() && target.width() > 1 && target.height() > 1
-            && (img.width() > target.width() || img.height() > target.height())) {
-            img = img.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        }
+        // GDI 侧直接缩到预览大小，比抓全分辨率再 Qt scale 快很多
+        QImage img = WinDisplay::captureDesktopRect(mon.geometry, target);
         QMetaObject::invokeMethod(this, [this, img, label, tab]() {
             m_grabBusy = false;
             if (tab != m_tabIndex || m_busy)
@@ -922,26 +924,7 @@ void MainWindow::onPreviewPointer(qreal nx, qreal ny, Qt::MouseButton button, bo
         return;
     const int x = m_previewGeo.left() + int(nx * qMax(1, m_previewGeo.width() - 1));
     const int y = m_previewGeo.top() + int(ny * qMax(1, m_previewGeo.height() - 1));
-
-    if (wheelDelta != 0) {
-        WinDisplay::sendMouseAt(x, y, Qt::NoButton, false, wheelDelta);
-        return;
-    }
-
-    if (button != Qt::NoButton && pressed) {
-        POINT pt{};
-        GetCursorPos(&pt);
-        m_savedCursor = QPoint(int(pt.x), int(pt.y));
-        m_cursorSaved = true;
-    }
-
-    WinDisplay::sendMouseAt(x, y, button, pressed, 0);
-
-    // 点击/拖拽结束后把光标拉回预览，便于连续操作
-    if (button != Qt::NoButton && !pressed && m_cursorSaved) {
-        SetCursorPos(m_savedCursor.x(), m_savedCursor.y());
-        m_cursorSaved = false;
-    }
+    WinDisplay::sendMouseAt(x, y, button, pressed, wheelDelta);
 }
 
 void MainWindow::onPreviewKey(int key, Qt::KeyboardModifiers mods, bool pressed)

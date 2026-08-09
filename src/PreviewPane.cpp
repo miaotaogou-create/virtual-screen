@@ -1,9 +1,11 @@
 #include "PreviewPane.h"
 
+#include <QEvent>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
@@ -92,7 +94,8 @@ void PreviewPane::setPixmap(const QPixmap &pm)
     if (!pm.isNull()) {
         m_placeholder.clear();
         showGuidePanel(false);
-        setCursor(Qt::CrossCursor);
+        // 系统光标藏掉，改画软光标，避免注入时「光标跑丢」
+        setCursor(Qt::BlankCursor);
     }
     update();
 }
@@ -102,6 +105,7 @@ void PreviewPane::setPlaceholder(const QString &text)
     m_placeholder = text;
     m_source = QPixmap();
     m_scaled = QPixmap();
+    m_cursorVisible = false;
     setCursor(Qt::ArrowCursor);
     showGuidePanel(false);
     update();
@@ -113,6 +117,7 @@ void PreviewPane::setGuide(const QString &title, const QString &body,
     m_source = QPixmap();
     m_scaled = QPixmap();
     m_placeholder.clear();
+    m_cursorVisible = false;
     setCursor(Qt::ArrowCursor);
     m_guideTitle->setText(title);
     m_guideBody->setText(body);
@@ -131,6 +136,28 @@ void PreviewPane::resizeEvent(QResizeEvent *e)
     layoutGuide();
 }
 
+void PreviewPane::enterEvent(QEvent *e)
+{
+    QWidget::enterEvent(e);
+    if (!m_hot && !m_source.isNull()) {
+        m_hot = true;
+        emit hotChanged(true);
+    }
+}
+
+void PreviewPane::leaveEvent(QEvent *e)
+{
+    QWidget::leaveEvent(e);
+    if (!m_dragging) {
+        m_cursorVisible = false;
+        update();
+        if (m_hot) {
+            m_hot = false;
+            emit hotChanged(false);
+        }
+    }
+}
+
 void PreviewPane::ensureScaled()
 {
     if (m_source.isNull() || size().width() < 2 || size().height() < 2)
@@ -142,7 +169,7 @@ void PreviewPane::ensureScaled()
         m_scaled = m_source;
         return;
     }
-    m_scaled = m_source.scaled(fitted, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    m_scaled = m_source.scaled(fitted, Qt::IgnoreAspectRatio, Qt::FastTransformation);
 }
 
 QRect PreviewPane::contentRect() const
@@ -169,6 +196,39 @@ bool PreviewPane::mapToNorm(const QPoint &pos, qreal *nx, qreal *ny) const
     return true;
 }
 
+void PreviewPane::updateSoftCursor(const QPoint &pos)
+{
+    const bool on = contentRect().contains(pos);
+    if (on != m_cursorVisible || m_cursorPos != pos) {
+        m_cursorVisible = on;
+        m_cursorPos = pos;
+        update();
+    }
+}
+
+void PreviewPane::drawSoftCursor(QPainter &p) const
+{
+    if (!m_cursorVisible)
+        return;
+    // 经典箭头软光标，描边保证在亮/暗画面上都看得见
+    QPainterPath path;
+    path.moveTo(0, 0);
+    path.lineTo(0, 16);
+    path.lineTo(4, 12);
+    path.lineTo(7, 18);
+    path.lineTo(9, 17);
+    path.lineTo(6, 11);
+    path.lineTo(11, 11);
+    path.closeSubpath();
+    p.save();
+    p.translate(m_cursorPos);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(0, 0, 0), 1.6));
+    p.setBrush(QColor(255, 255, 255));
+    p.drawPath(path);
+    p.restore();
+}
+
 void PreviewPane::emitPointer(const QPoint &pos, Qt::MouseButton button, bool pressed, int wheelDelta)
 {
     qreal nx = 0, ny = 0;
@@ -186,6 +246,7 @@ void PreviewPane::mousePressEvent(QMouseEvent *e)
     setFocus(Qt::MouseFocusReason);
     grabMouse();
     m_dragging = true;
+    updateSoftCursor(e->pos());
     emitPointer(e->pos(), e->button(), true);
     e->accept();
 }
@@ -196,10 +257,19 @@ void PreviewPane::mouseReleaseEvent(QMouseEvent *e)
         QWidget::mouseReleaseEvent(e);
         return;
     }
+    updateSoftCursor(e->pos());
     emitPointer(e->pos(), e->button(), false);
     m_dragging = false;
     if (mouseGrabber() == this)
         releaseMouse();
+    if (!rect().contains(mapFromGlobal(QCursor::pos()))) {
+        m_cursorVisible = false;
+        if (m_hot) {
+            m_hot = false;
+            emit hotChanged(false);
+        }
+        update();
+    }
     e->accept();
 }
 
@@ -209,7 +279,7 @@ void PreviewPane::mouseMoveEvent(QMouseEvent *e)
         QWidget::mouseMoveEvent(e);
         return;
     }
-    // 仅按下拖拽时转发移动，避免 SendInput 把光标打到虚拟屏后丢跟踪
+    updateSoftCursor(e->pos());
     if (m_dragging || (e->buttons() != Qt::NoButton))
         emitPointer(e->pos(), Qt::NoButton, true);
     e->accept();
@@ -221,6 +291,7 @@ void PreviewPane::wheelEvent(QWheelEvent *e)
         QWidget::wheelEvent(e);
         return;
     }
+    updateSoftCursor(e->pos());
     emitPointer(e->pos(), Qt::NoButton, false, e->angleDelta().y());
     e->accept();
 }
@@ -256,6 +327,7 @@ void PreviewPane::paintEvent(QPaintEvent *)
             const int y = (height() - m_scaled.height()) / 2;
             p.drawPixmap(x, y, m_scaled);
         }
+        drawSoftCursor(p);
         return;
     }
     if (m_guide->isVisible())
