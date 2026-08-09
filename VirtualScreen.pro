@@ -35,7 +35,7 @@ HEADERS += \
     src/AppConfig.h \
     src/Elevate.h
 
-LIBS += -luser32 -lgdi32 -lshell32 -ladvapi32
+LIBS += -luser32 -lgdi32 -lshell32 -ladvapi32 -lsetupapi -lcfgmgr32
 
 RC_ICONS = resources/VirtualScreen.ico
 RESOURCES += resources/app.qrc

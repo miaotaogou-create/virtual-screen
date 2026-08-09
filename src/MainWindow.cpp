@@ -33,7 +33,7 @@
 #endif
 
 static const char *kDriverReleasesUrl =
-    "https://github.com/VirtualDrivers/Virtual-Display-Driver/releases";
+    "https://github.com/nomi-san/parsec-vdd/releases";
 
 MainWindow::MainWindow(QWidget *parent)
     : QWidget(parent)
@@ -274,9 +274,10 @@ void MainWindow::refreshGuide()
         m_preview->setGuide(
             QStringLiteral("还差一步：安装虚拟显示驱动"),
             QStringLiteral(
-                "1. 点下方「打开驱动下载页」，安装 Virtual Display Driver\n"
-                "2. 或管理员运行仓库 scripts\\install_vdd.ps1\n"
-                "3. 装好后回到本程序，点顶栏「应用」创建虚拟屏"),
+                "1. 点下方「打开驱动下载页」，安装 Parsec VDD（ParsecVDisplay）\n"
+                "2. 装好后设备里应出现 Parsec Virtual Display Adapter\n"
+                "3. 回到本程序，点顶栏「应用」创建虚拟屏\n"
+                "（建议先关掉官方 ParsecVDisplay，避免抢控）"),
             QStringLiteral("打开驱动下载页"),
             QStringLiteral("查看安装说明"));
         return;
@@ -478,7 +479,8 @@ static bool looksSuccess(const QString &title, const QString &msg)
             || msg.startsWith(QStringLiteral("已更新"));
     if (title == QStringLiteral("清除"))
         return msg.startsWith(QStringLiteral("已请求禁用"))
-            || msg.contains(QStringLiteral("未找到虚拟显示驱动设备"));
+            || msg.contains(QStringLiteral("未找到 Parsec"))
+            || msg.contains(QStringLiteral("无需清除"));
     return !msg.contains(QStringLiteral("失败"));
 }
 

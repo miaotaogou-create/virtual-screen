@@ -15,10 +15,10 @@ namespace {
 bool looksVirtual(const QString &text)
 {
     const QString t = text.toUpper();
-    return t.contains(QStringLiteral("VDD"))
-        || t.contains(QStringLiteral("MTT"))
+    return t.contains(QStringLiteral("PARSEC"))
+        || t.contains(QStringLiteral("PSCCDD0"))
+        || t.contains(QStringLiteral("PARSECVDA"))
         || t.contains(QStringLiteral("VIRTUAL DISPLAY"))
-        || t.contains(QStringLiteral("MTTVDD"))
         || t.contains(QStringLiteral("IDDSAMPLE"))
         || t.contains(QStringLiteral("INDIRECT"));
 }
