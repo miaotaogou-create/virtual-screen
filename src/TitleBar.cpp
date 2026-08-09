@@ -23,8 +23,6 @@ TitleBar::TitleBar(QWidget *parent)
     lay->setContentsMargins(10, 0, 0, 0);
     lay->setSpacing(2);
 
-    m_title = new QLabel(QStringLiteral("VirtualScreen"), this);
-    m_title->setStyleSheet(QStringLiteral("font-weight:600;"));
     m_hint = new QLabel(this);
     m_hint->setStyleSheet(QStringLiteral("color:#CCFBF1; font-size:11px;"));
 
@@ -43,7 +41,6 @@ TitleBar::TitleBar(QWidget *parent)
     m_maxBtn->setToolTip(QStringLiteral("最大化"));
     closeBtn->setToolTip(QStringLiteral("关闭"));
 
-    lay->addWidget(m_title);
     lay->addWidget(m_hint, 1);
     lay->addWidget(m_clear);
     lay->addWidget(sep);
@@ -84,11 +81,6 @@ void TitleBar::syncMaxButton()
     const bool maxed = window()->isMaximized();
     m_maxBtn->setKind(maxed ? ChromeButton::Restore : ChromeButton::Maximize);
     m_maxBtn->setToolTip(maxed ? QStringLiteral("还原") : QStringLiteral("最大化"));
-}
-
-void TitleBar::setAdminHint(const QString &text)
-{
-    m_title->setText(QStringLiteral("VirtualScreen · ") + text);
 }
 
 void TitleBar::setStatusHint(const QString &text)

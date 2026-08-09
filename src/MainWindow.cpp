@@ -81,7 +81,6 @@ MainWindow::MainWindow(QWidget *parent)
     root->setSpacing(0);
 
     m_title = new TitleBar(this);
-    m_title->setAdminHint(Elevate::isAdmin() ? QStringLiteral("管理员") : QStringLiteral("普通权限"));
     root->addWidget(m_title);
 
     m_preview = new PreviewPane(this);
@@ -884,12 +883,11 @@ void MainWindow::refreshPreview()
     const QSize target = m_preview->size();
     const int tab = m_tabIndex;
 
-    m_title->setStatusHint(QStringLiteral("%1  %2×%3 @%4Hz  %5")
+    m_title->setStatusHint(QStringLiteral("%1  %2×%3 @%4Hz")
                                .arg(label)
                                .arg(spec.width)
                                .arg(spec.height)
-                               .arg(spec.hz)
-                               .arg(mon.deviceName));
+                               .arg(spec.hz));
 
     m_grabBusy = true;
     auto *th = QThread::create([this, mon, target, label, tab]() {

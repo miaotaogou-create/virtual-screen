@@ -20,7 +20,6 @@ signals:
     void closeClicked();
 
 public slots:
-    void setAdminHint(const QString &text);
     void setStatusHint(const QString &text);
 
 protected:
@@ -31,7 +30,6 @@ protected:
 private:
     void toggleMaxRestore();
 
-    QLabel *m_title = nullptr;
     QLabel *m_hint = nullptr;
     QPushButton *m_clear = nullptr;
     ChromeButton *m_maxBtn = nullptr;
