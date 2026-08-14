@@ -13,7 +13,7 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("VirtualScreen"));
-    app.setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setApplicationVersion(QStringLiteral("1.0.0"));
     app.setWindowIcon(QIcon(QStringLiteral(":/VirtualScreen.png")));
     QFont f = app.font();
     f.setFamily(QStringLiteral("Microsoft YaHei UI"));
