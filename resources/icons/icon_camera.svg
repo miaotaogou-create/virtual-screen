@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M4 7h4l2-2h4l2 2h4v12H4z"/>
-  <circle cx="12" cy="13" r="3"/>
+  <!-- 加大机身占比，与刷新/全屏图标视觉重量一致 -->
+  <path d="M2 7h4l2-2.5h8L18 7h4v13H2z"/>
+  <circle cx="12" cy="13.5" r="4"/>
 </svg>
