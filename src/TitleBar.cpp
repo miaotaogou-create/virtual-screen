@@ -2,53 +2,92 @@
 
 #include "ChromeButton.h"
 
-#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
-#include <QPushButton>
+#include <QPainter>
+#include <QSvgRenderer>
+#include <QStyle>
+
+namespace {
+
+/** 标题栏主图标：加载 Fluent SVG 矢量资源。 */
+class AppIcon : public QWidget
+{
+public:
+    explicit AppIcon(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("AppIcon"));
+        setFixedSize(28, 28);
+        m_renderer.load(QStringLiteral(":/app_icon.svg"));
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        m_renderer.render(&p, rect());
+    }
+
+private:
+    QSvgRenderer m_renderer;
+};
+
+} // namespace
 
 TitleBar::TitleBar(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedHeight(28);
-    setStyleSheet(QStringLiteral(
-        "TitleBar { background:#0F766E; }"
-        "QLabel { color:#fff; background:transparent; }"
-        "QPushButton { background:transparent; color:#ECFDF5; border:none; padding:0 10px; }"
-        "QPushButton:hover { background:#0D9488; }"
-        "QPushButton:disabled { color:#99F6E4; }"));
+    setObjectName(QStringLiteral("TitleBar"));
+    setAttribute(Qt::WA_StyledBackground, true);
+    setFixedHeight(46);
 
     auto *lay = new QHBoxLayout(this);
-    lay->setContentsMargins(10, 0, 0, 0);
-    lay->setSpacing(2);
+    lay->setContentsMargins(14, 6, 6, 6);
+    lay->setSpacing(10);
 
-    m_hint = new QLabel(this);
-    m_hint->setStyleSheet(QStringLiteral("color:#CCFBF1; font-size:11px;"));
+    lay->addWidget(new AppIcon(this));
 
-    m_clear = new QPushButton(QStringLiteral("清除全部"), this);
-    m_clear->setToolTip(QStringLiteral("移除所有虚拟屏"));
+    auto *appTitle = new QLabel(QStringLiteral("虚拟屏助手"), this);
+    appTitle->setObjectName(QStringLiteral("AppTitle"));
 
-    auto *sep = new QFrame(this);
-    sep->setFrameShape(QFrame::VLine);
-    sep->setFixedWidth(1);
-    sep->setStyleSheet(QStringLiteral("background:#99F6E4; margin:6px 4px;"));
+    auto *ver = new QLabel(QStringLiteral("v1.1 Fluent"), this);
+    ver->setObjectName(QStringLiteral("VersionBadge"));
+    ver->setFixedHeight(22);
+    ver->setAlignment(Qt::AlignCenter);
+
+    m_statusPill = new QWidget(this);
+    m_statusPill->setObjectName(QStringLiteral("DriverStatusPill"));
+    m_statusPill->setProperty("ready", false);
+    m_statusPill->setFixedHeight(22);
+    auto *pillLay = new QHBoxLayout(m_statusPill);
+    pillLay->setContentsMargins(8, 0, 10, 0);
+    pillLay->setSpacing(6);
+    m_statusDot = new QLabel(m_statusPill);
+    m_statusDot->setObjectName(QStringLiteral("StatusDot"));
+    m_statusDot->setFixedSize(6, 6);
+    m_statusText = new QLabel(QStringLiteral("驱动检测中…"), m_statusPill);
+    m_statusText->setObjectName(QStringLiteral("StatusText"));
+    pillLay->addWidget(m_statusDot, 0, Qt::AlignVCenter);
+    pillLay->addWidget(m_statusText, 0, Qt::AlignVCenter);
+
+    lay->addWidget(appTitle);
+    lay->addWidget(ver);
+    lay->addWidget(m_statusPill);
+    lay->addStretch();
 
     auto *minBtn = new ChromeButton(ChromeButton::Minimize, this);
     m_maxBtn = new ChromeButton(ChromeButton::Maximize, this);
     auto *closeBtn = new ChromeButton(ChromeButton::Close, this);
-    minBtn->setToolTip(QStringLiteral("最小化"));
-    m_maxBtn->setToolTip(QStringLiteral("最大化"));
-    closeBtn->setToolTip(QStringLiteral("关闭"));
+    minBtn->setFixedSize(40, 32);
+    m_maxBtn->setFixedSize(40, 32);
+    closeBtn->setFixedSize(40, 32);
 
-    lay->addWidget(m_hint, 1);
-    lay->addWidget(m_clear);
-    lay->addWidget(sep);
     lay->addWidget(minBtn);
     lay->addWidget(m_maxBtn);
     lay->addWidget(closeBtn);
 
-    connect(m_clear, &QPushButton::clicked, this, &TitleBar::clearClicked);
     connect(closeBtn, &QAbstractButton::clicked, this, &TitleBar::closeClicked);
     connect(minBtn, &QAbstractButton::clicked, this, [this]() {
         if (window())
@@ -59,7 +98,24 @@ TitleBar::TitleBar(QWidget *parent)
 
 void TitleBar::setBusy(bool busy)
 {
-    m_clear->setEnabled(!busy);
+    Q_UNUSED(busy);
+}
+
+void TitleBar::setDriverReady(bool ready, int virtualCount)
+{
+    m_statusPill->setProperty("ready", ready);
+    if (ready) {
+        m_statusText->setText(
+            QStringLiteral("Parsec 驱动就绪 (%1 屏运行)").arg(qMax(virtualCount, 0)));
+    } else {
+        m_statusText->setText(QStringLiteral("未检测到 Parsec 驱动"));
+    }
+    m_statusPill->style()->unpolish(m_statusPill);
+    m_statusPill->style()->polish(m_statusPill);
+    m_statusDot->style()->unpolish(m_statusDot);
+    m_statusDot->style()->polish(m_statusDot);
+    m_statusText->style()->unpolish(m_statusText);
+    m_statusText->style()->polish(m_statusText);
 }
 
 void TitleBar::toggleMaxRestore()
@@ -80,12 +136,12 @@ void TitleBar::syncMaxButton()
         return;
     const bool maxed = window()->isMaximized();
     m_maxBtn->setKind(maxed ? ChromeButton::Restore : ChromeButton::Maximize);
-    m_maxBtn->setToolTip(maxed ? QStringLiteral("还原") : QStringLiteral("最大化"));
 }
 
 void TitleBar::setStatusHint(const QString &text)
 {
-    m_hint->setText(text);
+    if (!text.isEmpty())
+        m_statusPill->setToolTip(text);
 }
 
 void TitleBar::mousePressEvent(QMouseEvent *e)

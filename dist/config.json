@@ -3,19 +3,19 @@
         {
             "height": 1200,
             "hz": 60,
-            "label": "显控",
+            "label": "屏1",
             "scale": 125,
             "width": 1920
         },
         {
             "height": 1200,
             "hz": 60,
-            "label": "视频",
+            "label": "屏2",
             "scale": 125,
             "width": 1920
         }
     ],
-    "preview_interval_ms": 2000,
+    "preview_interval_ms": 250,
     "profile_name": "双屏-1920x1200",
     "vdd_settings_path": "C:/VirtualDisplayDriver/vdd_settings.xml"
 }

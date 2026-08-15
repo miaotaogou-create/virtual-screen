@@ -3,6 +3,18 @@
 #include <QMouseEvent>
 #include <QPainter>
 
+namespace {
+
+const QColor kIconNormal(0x94, 0xa3, 0xb8);
+const QColor kIconHover(0xff, 0xff, 0xff);
+const QColor kTitleBarBg(0x07, 0x0e, 0x18);
+const QColor kHoverChromeBg(0xff, 0xff, 0xff, 20); // rgba(255,255,255,0.08)
+const QColor kHoverCloseBg(0xe1, 0x1d, 0x48);
+const QColor kPressedCloseBg(0xbe, 0x12, 0x3c);
+const QColor kPressedChromeBg(0xff, 0xff, 0xff, 30);
+
+} // namespace
+
 ChromeButton::ChromeButton(Kind kind, QWidget *parent)
     : QAbstractButton(parent)
     , m_kind(kind)
@@ -52,17 +64,23 @@ void ChromeButton::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
-    if (m_pressed) {
-        p.fillRect(rect(), m_kind == Close ? QColor(0x7F, 0x1D, 0x1D) : QColor(0x11, 0x5E, 0x59));
+    if (m_kind == Close) {
+        if (m_pressed)
+            p.fillRect(rect(), kPressedCloseBg);
+        else if (m_hover)
+            p.fillRect(rect(), kHoverCloseBg);
+    } else if (m_pressed) {
+        p.fillRect(rect(), kPressedChromeBg);
     } else if (m_hover) {
-        p.fillRect(rect(), m_kind == Close ? QColor(0xB9, 0x1C, 0x1C) : QColor(0x0D, 0x94, 0x88));
+        p.fillRect(rect(), kHoverChromeBg);
     }
 
     const qreal cx = width() * 0.5;
     const qreal cy = height() * 0.5;
-    const qreal s = 5.0;
+    const qreal s = 4.5;
 
-    QPen pen(QColor(0xEC, 0xFD, 0xF5));
+    const QColor iconColor = (m_hover || m_pressed) ? kIconHover : kIconNormal;
+    QPen pen(iconColor);
     pen.setWidthF(1.4);
     pen.setCapStyle(Qt::FlatCap);
     pen.setJoinStyle(Qt::MiterJoin);
@@ -77,8 +95,8 @@ void ChromeButton::paintEvent(QPaintEvent *)
         p.drawRect(QRectF(cx - s, cy - s, s * 2, s * 2));
         break;
     case Restore: {
-        const QColor bg = m_pressed ? QColor(0x11, 0x5E, 0x59)
-                                    : (m_hover ? QColor(0x0D, 0x94, 0x88) : QColor(0x0F, 0x76, 0x6E));
+        const QColor bg = m_pressed ? kPressedChromeBg
+                                    : (m_hover ? kHoverChromeBg : kTitleBarBg);
         p.drawRect(QRectF(cx - s + 2.0, cy - s, s * 2 - 2.0, s * 2 - 2.0));
         p.fillRect(QRectF(cx - s, cy - s + 2.0, s * 2 - 2.0, s * 2 - 2.0), bg);
         p.drawRect(QRectF(cx - s, cy - s + 2.0, s * 2 - 2.0, s * 2 - 2.0));

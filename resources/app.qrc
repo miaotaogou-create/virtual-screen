@@ -2,5 +2,24 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>VirtualScreen.png</file>
+        <file>app_icon.svg</file>
+        <file>folder_download.svg</file>
+        <file>folder_download_icon.svg</file>
+        <file>icons/icon_focus_tv.svg</file>
+        <file>icons/icon_topology_move.svg</file>
+        <file>icons/icon_grid_view.svg</file>
+        <file>icons/icon_cast_display.svg</file>
+        <file>icons/icon_refresh.svg</file>
+        <file>icons/icon_add.svg</file>
+        <file>icons/icon_trash.svg</file>
+        <file>icons/icon_sidebar_toggle.svg</file>
+        <file>icons/icon_presets_layers.svg</file>
+        <file>icons/icon_save.svg</file>
+        <file>icons/icon_export.svg</file>
+        <file>icons/icon_tune_sliders.svg</file>
+        <file>icons/icon_chevron_down.svg</file>
+        <file>icons/icon_expand.svg</file>
+        <file>icons/icon_camera.svg</file>
+        <file>style.qss</file>
     </qresource>
 </RCC>

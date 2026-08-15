@@ -6,7 +6,7 @@ class QLabel;
 class QPushButton;
 class ChromeButton;
 
-/** 窄标题栏：状态 + 清除全部 + 窗口按钮。 */
+/** Fluent 无边框标题栏：应用名、状态、窗口按钮。 */
 class TitleBar : public QWidget
 {
     Q_OBJECT
@@ -14,9 +14,9 @@ public:
     explicit TitleBar(QWidget *parent = nullptr);
     void syncMaxButton();
     void setBusy(bool busy);
+    void setDriverReady(bool ready, int virtualCount);
 
 signals:
-    void clearClicked();
     void closeClicked();
 
 public slots:
@@ -30,8 +30,9 @@ protected:
 private:
     void toggleMaxRestore();
 
-    QLabel *m_hint = nullptr;
-    QPushButton *m_clear = nullptr;
+    QLabel *m_statusDot = nullptr;
+    QLabel *m_statusText = nullptr;
+    QWidget *m_statusPill = nullptr;
     ChromeButton *m_maxBtn = nullptr;
     QPoint m_dragPos;
     bool m_dragging = false;

@@ -208,6 +208,41 @@ bool applyDisplayChanges()
     return ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr) == DISP_CHANGE_SUCCESSFUL;
 }
 
+bool arrangePositions(const QVector<QPair<QString, QPoint>> &placements)
+{
+    if (placements.isEmpty())
+        return false;
+
+    // 先确保扩展拓扑，避免复制模式下改坐标无效
+    forceExtendTopology();
+
+    bool any = false;
+    for (const auto &item : placements) {
+        const QString &device = item.first;
+        const QPoint pos = item.second;
+        if (device.isEmpty())
+            continue;
+
+        DEVMODEW dm{};
+        dm.dmSize = sizeof(dm);
+        const std::wstring name = device.toStdWString();
+        if (!EnumDisplaySettingsW(name.c_str(), ENUM_CURRENT_SETTINGS, &dm))
+            continue;
+
+        dm.dmPosition.x = pos.x();
+        dm.dmPosition.y = pos.y();
+        dm.dmFields = DM_POSITION;
+        // 保留当前分辨率与刷新率，只搬位置
+        const LONG rc = ChangeDisplaySettingsExW(name.c_str(), &dm, nullptr,
+                                                 CDS_UPDATEREGISTRY | CDS_NORESET, nullptr);
+        if (rc == DISP_CHANGE_SUCCESSFUL)
+            any = true;
+    }
+    if (!any)
+        return false;
+    return applyDisplayChanges();
+}
+
 bool hasCloneTopology()
 {
     UINT32 pathCount = 0;

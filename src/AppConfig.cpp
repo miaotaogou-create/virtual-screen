@@ -48,7 +48,14 @@ static AppConfig parseObject(const QJsonObject &o)
 {
     AppConfig c = AppConfig::defaults();
     c.displays.clear();
-    c.previewIntervalMs = o.value(QStringLiteral("preview_interval_ms")).toInt(2000);
+    c.previewIntervalMs = o.value(QStringLiteral("preview_interval_ms")).toInt(250);
+    // 旧默认 2000ms 会让预览里的毫秒时钟几乎不动
+    if (c.previewIntervalMs == 2000)
+        c.previewIntervalMs = 250;
+    if (c.previewIntervalMs < 100)
+        c.previewIntervalMs = 100;
+    if (c.previewIntervalMs > 5000)
+        c.previewIntervalMs = 5000;
     c.vddSettingsPath = o.value(QStringLiteral("vdd_settings_path")).toString(c.vddSettingsPath);
     c.profileName = o.value(QStringLiteral("profile_name")).toString();
     const QJsonArray arr = o.value(QStringLiteral("displays")).toArray();
@@ -98,7 +105,7 @@ AppConfig AppConfig::defaults()
     a.scale = 125;
     a.hz = 60;
     c.displays = {a};
-    c.previewIntervalMs = 2000;
+    c.previewIntervalMs = 250;
     c.profileName = QStringLiteral("默认");
     return c;
 }

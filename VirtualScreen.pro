@@ -1,4 +1,4 @@
-QT += core gui widgets
+QT += core gui widgets svg
 CONFIG += c++14
 TARGET = VirtualScreen
 TEMPLATE = app
@@ -17,7 +17,14 @@ SOURCES += \
     src/MainWindow.cpp \
     src/TitleBar.cpp \
     src/ChromeButton.cpp \
-    src/PreviewPane.cpp \
+    src/TopologyCanvas.cpp \
+    src/PropertiesDrawer.cpp \
+    src/SwitchButton.cpp \
+    src/CastWindowDialog.cpp \
+    src/PresetHubDialog.cpp \
+    src/AddDisplayDialog.cpp \
+    src/AppAlertDialog.cpp \
+    src/SchemeComboBox.cpp \
     src/SettingsPanel.cpp \
     src/WinDisplay.cpp \
     src/VddService.cpp \
@@ -28,7 +35,14 @@ HEADERS += \
     src/MainWindow.h \
     src/TitleBar.h \
     src/ChromeButton.h \
-    src/PreviewPane.h \
+    src/TopologyCanvas.h \
+    src/PropertiesDrawer.h \
+    src/SwitchButton.h \
+    src/CastWindowDialog.h \
+    src/PresetHubDialog.h \
+    src/AddDisplayDialog.h \
+    src/AppAlertDialog.h \
+    src/SchemeComboBox.h \
     src/SettingsPanel.h \
     src/WinDisplay.h \
     src/VddService.h \

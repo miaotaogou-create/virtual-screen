@@ -40,4 +40,6 @@ if (Test-Path $vendorDrv) {
     Write-Host "已附带 dist\parsec-vdd\parsec-vdd-0.45.0.0.exe"
 }
 
+Copy-Item (Join-Path $PSScriptRoot "resources\style.qss") (Join-Path $PSScriptRoot "dist\style.qss") -Force
+
 Write-Host "OK $exe"
