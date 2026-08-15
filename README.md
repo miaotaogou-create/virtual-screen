@@ -6,30 +6,26 @@
 
 ## 运行
 
-### 开发/本机目录版（推荐调试）
+### 安装包（推荐发版）
+
+```powershell
+.\pack_setup.ps1
+```
+
+输出：`dist\VirtualScreen-Setup-v1.1.exe`。安装时会：
+
+1. 写入程序目录（默认 `Program Files\VirtualScreen`）与开始菜单 / 桌面快捷方式  
+2. **以管理员静默安装**捆绑的 Parsec VDD 驱动（`vendor\parsec-vdd\…`）
+
+卸载只删本程序，**不会**卸掉系统里的 Parsec VDD。
+
+### 开发/本机目录版（调试）
 
 ```text
 dist\VirtualScreen.exe
 ```
 
-同目录需有 Qt DLL（`build_qt.ps1` 会用 windeployqt 部署）。**整份 `dist\` 文件夹**拷到别的电脑即可跑（需目标机有 VC++ 运行库，或把 `msvcp140.dll` / `vcruntime140*.dll` 一并放进 `dist`）。
-
-### 单文件绿色版（Enigma Virtual Box）
-
-Qt 不是静态单文件；做法是 **windeployqt 收齐 DLL → EVB 虚拟进主程序**。
-
-```powershell
-.\pack_evb.ps1
-```
-
-脚本会编译、准备 `build\evb_stage`，并打开 EVB。按控制台里那 **5 步**点完即可（比自动点对话框靠谱）。  
-输出：`dist\portable\VirtualScreen.exe`。脚本会把 `profiles\` 与 `config.json` 预先放到 exe **旁边**（勿打进虚拟盒）。
-
-首次在 EVB 里 Save Project 为 `pack\VirtualScreen.evb` 后，以后也可用：
-
-```text
-enigmavbconsole.exe pack\VirtualScreen.evb -input build\evb_stage\VirtualScreen.exe -output dist\portable\VirtualScreen.exe
-```
+同目录需有 Qt DLL（`build_qt.ps1` 会用 windeployqt 部署）。
 
 ## 编译
 

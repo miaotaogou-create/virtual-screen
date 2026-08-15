@@ -21,4 +21,6 @@ build/*.spec
 VirtualScreen_resource.rc
 build/
 dist/portable/
+dist/VirtualScreen-Setup*.exe
+dist/VirtualScreen-v*.exe
 
