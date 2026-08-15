@@ -537,7 +537,7 @@ void TopologyCanvas::paintFocus(QPainter &p)
     p.setPen(QPen(QColor(QStringLiteral("#0284c7")), 2));
     p.setBrush(Qt::NoBrush);
     p.drawRoundedRect(frame.adjusted(-1, -1, 1, 1), 10, 10);
-    paintFocusFrameTools(p, frame);
+    // 全屏/截图已挪到信息栏，不再叠在预览画面上
 }
 
 void TopologyCanvas::paintGrid(QPainter &p)
@@ -619,16 +619,6 @@ void TopologyCanvas::paintEvent(QPaintEvent *event)
 
 void TopologyCanvas::mousePressEvent(QMouseEvent *event)
 {
-    const int tool = hitTestFocusTool(event->pos());
-    if (tool == 0) {
-        emit expandRequested();
-        return;
-    }
-    if (tool == 1) {
-        emit screenshotRequested();
-        return;
-    }
-
     const int hit = hitTestDisplay(event->pos());
     if (hit >= 0) {
         m_selected = hit;
@@ -657,14 +647,7 @@ void TopologyCanvas::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    if (m_mode == Focus) {
-        const int tool = hitTestFocusTool(event->pos());
-        if (tool != m_hoverTool) {
-            m_hoverTool = tool;
-            setCursor(tool >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
-            update();
-        }
-    } else if (m_mode == Topology) {
+    if (m_mode == Topology) {
         const int card = hitTestDisplay(event->pos());
         if (card != m_hoverCard) {
             m_hoverCard = card;
@@ -696,8 +679,7 @@ void TopologyCanvas::mouseReleaseEvent(QMouseEvent *event)
 
 void TopologyCanvas::leaveEvent(QEvent *event)
 {
-    if (m_hoverTool >= 0 || m_hoverCard >= 0) {
-        m_hoverTool = -1;
+    if (m_hoverCard >= 0) {
         m_hoverCard = -1;
         if (m_dragIndex < 0)
             setCursor(Qt::ArrowCursor);

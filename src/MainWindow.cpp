@@ -434,18 +434,38 @@ void MainWindow::setupMonitorChrome(QVBoxLayout *root)
     styleIconBtn(infoRefresh,
                  svgIcon(QStringLiteral(":/icons/icon_refresh.svg"), kIconRefresh, 16), 16);
 
+    auto *infoFs = new QPushButton(m_screenInfoBar);
+    infoFs->setObjectName(QStringLiteral("MonitorChromeBtn"));
+    infoFs->setFixedSize(28, 28);
+    infoFs->setCursor(Qt::PointingHandCursor);
+    infoFs->setToolTip(QStringLiteral("全屏预览"));
+    styleIconBtn(infoFs,
+                 svgIcon(QStringLiteral(":/icons/icon_expand.svg"), kViewIconActive, 16), 16);
+
+    auto *infoShot = new QPushButton(m_screenInfoBar);
+    infoShot->setObjectName(QStringLiteral("MonitorChromeBtn"));
+    infoShot->setFixedSize(28, 28);
+    infoShot->setCursor(Qt::PointingHandCursor);
+    infoShot->setToolTip(QStringLiteral("截图保存"));
+    styleIconBtn(infoShot,
+                 svgIcon(QStringLiteral(":/icons/icon_camera.svg"), kViewIconActive, 16), 16);
+
     auto *infoExpand = new QPushButton(m_screenInfoBar);
     infoExpand->setObjectName(QStringLiteral("MonitorChromeBtn"));
     infoExpand->setFixedSize(28, 28);
     infoExpand->setCursor(Qt::PointingHandCursor);
     infoExpand->setToolTip(QStringLiteral("展开/收起属性面板"));
     styleIconBtn(infoExpand,
-                 svgIcon(QStringLiteral(":/icons/icon_expand.svg"), kIconMuted, 16), 16);
+                 svgIcon(QStringLiteral(":/icons/icon_sidebar_toggle.svg"), kIconMuted, 16), 16);
 
     infoLay->addWidget(infoRefresh, 0, Qt::AlignVCenter);
+    infoLay->addWidget(infoFs, 0, Qt::AlignVCenter);
+    infoLay->addWidget(infoShot, 0, Qt::AlignVCenter);
     infoLay->addWidget(infoExpand, 0, Qt::AlignVCenter);
 
     connect(infoRefresh, &QPushButton::clicked, this, &MainWindow::refreshPreview);
+    connect(infoFs, &QPushButton::clicked, this, &MainWindow::showFocusFullscreen);
+    connect(infoShot, &QPushButton::clicked, this, &MainWindow::saveFocusScreenshot);
     connect(infoExpand, &QPushButton::clicked, this, [this]() {
         m_drawerToggle->setChecked(!m_drawerToggle->isChecked());
     });
