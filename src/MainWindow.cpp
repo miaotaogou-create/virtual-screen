@@ -34,6 +34,7 @@
 #include <QPixmap>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 #include <QProcess>
 #include <QPushButton>
 #include <QShowEvent>
@@ -1203,12 +1204,17 @@ void MainWindow::showFocusFullscreen()
         return;
 
     m_tabIndex = qBound(0, m_tabIndex, m_cfg.displays.size() - 1);
-    QPixmap pm = m_canvas->previewPixmap(m_tabIndex);
-    if (pm.isNull()) {
-        const QVector<MonitorInfo> virtuals = matchedVirtuals();
-        if (m_tabIndex < virtuals.size() && !virtuals[m_tabIndex].deviceName.isEmpty())
-            pm = QPixmap::fromImage(WinDisplay::captureDesktopRect(virtuals[m_tabIndex].geometry));
+    const QVector<MonitorInfo> virtuals = matchedVirtuals();
+    if (m_tabIndex >= virtuals.size() || virtuals[m_tabIndex].deviceName.isEmpty()) {
+        AppAlertDialog::information(this, QStringLiteral("全屏预览"),
+                                    QStringLiteral("该虚拟屏尚未出现在系统中，无法全屏预览。"));
+        return;
     }
+    const QRect monGeo = virtuals[m_tabIndex].geometry;
+
+    QPixmap pm = m_canvas->previewPixmap(m_tabIndex);
+    if (pm.isNull())
+        pm = QPixmap::fromImage(WinDisplay::captureDesktopRect(monGeo));
     if (pm.isNull()) {
         AppAlertDialog::information(this, QStringLiteral("全屏预览"),
                                     QStringLiteral("当前屏尚无预览画面，请稍候再试。"));
@@ -1218,8 +1224,10 @@ void MainWindow::showFocusFullscreen()
     class FullscreenPreview : public QDialog
     {
     public:
-        explicit FullscreenPreview(const QPixmap &pm, QWidget *parent = nullptr)
+        FullscreenPreview(const QPixmap &pm, const QRect &monGeo, int intervalMs,
+                          QWidget *parent = nullptr)
             : QDialog(parent)
+            , m_monGeo(monGeo)
         {
             setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
             setAttribute(Qt::WA_DeleteOnClose, true);
@@ -1229,18 +1237,23 @@ void MainWindow::showFocusFullscreen()
             lay->setContentsMargins(0, 0, 0, 0);
             lay->setSpacing(0);
 
-            auto *lab = new QLabel(this);
-            lab->setAlignment(Qt::AlignCenter);
+            m_lab = new QLabel(this);
+            m_lab->setAlignment(Qt::AlignCenter);
             QScreen *screen = QGuiApplication::primaryScreen();
-            const QSize sz = screen ? screen->size() : QSize(1920, 1080);
-            lab->setPixmap(pm.scaled(sz, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            lay->addWidget(lab, 1);
+            m_viewSize = screen ? screen->size() : QSize(1920, 1080);
+            m_lab->setPixmap(pm.scaled(m_viewSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            lay->addWidget(m_lab, 1);
 
             auto *hint = new QLabel(QStringLiteral("按 Esc 或点击画面退出全屏"), this);
             hint->setAlignment(Qt::AlignCenter);
             hint->setStyleSheet(
                 QStringLiteral("color:#94a3b8;font-size:12px;padding:12px;background:transparent;"));
             lay->addWidget(hint);
+
+            // 全屏期间独立抓屏，避免只显示进入时的静态图
+            m_timer = new QTimer(this);
+            connect(m_timer, &QTimer::timeout, this, [this]() { tick(); });
+            m_timer->start(qBound(100, intervalMs, 5000));
         }
 
     protected:
@@ -1258,9 +1271,46 @@ void MainWindow::showFocusFullscreen()
             Q_UNUSED(event);
             accept();
         }
+
+    private:
+        void tick()
+        {
+            if (m_grabBusy || m_monGeo.isEmpty())
+                return;
+            m_grabBusy = true;
+            const QRect geo = m_monGeo;
+            const QSize view = m_viewSize;
+            QPointer<FullscreenPreview> self(this);
+            auto *th = QThread::create([self, geo, view]() {
+                const QImage img = WinDisplay::captureDesktopRect(geo);
+                QPixmap out;
+                if (!img.isNull()) {
+                    out = QPixmap::fromImage(img).scaled(view, Qt::KeepAspectRatio,
+                                                         Qt::FastTransformation);
+                }
+                QMetaObject::invokeMethod(
+                    qApp,
+                    [self, out]() {
+                        if (!self)
+                            return;
+                        if (!out.isNull() && self->m_lab)
+                            self->m_lab->setPixmap(out);
+                        self->m_grabBusy = false;
+                    },
+                    Qt::QueuedConnection);
+            });
+            connect(th, &QThread::finished, th, &QObject::deleteLater);
+            th->start();
+        }
+
+        QLabel *m_lab = nullptr;
+        QTimer *m_timer = nullptr;
+        QRect m_monGeo;
+        QSize m_viewSize;
+        bool m_grabBusy = false;
     };
 
-    auto *dlg = new FullscreenPreview(pm, this);
+    auto *dlg = new FullscreenPreview(pm, monGeo, m_cfg.previewIntervalMs, this);
     dlg->showFullScreen();
 }
 
