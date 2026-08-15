@@ -448,7 +448,7 @@ void MainWindow::setupMonitorChrome(QVBoxLayout *root)
     infoShot->setCursor(Qt::PointingHandCursor);
     infoShot->setToolTip(QStringLiteral("截图保存"));
     styleIconBtn(infoShot,
-                 svgIcon(QStringLiteral(":/icons/icon_camera.svg"), kViewIconActive, 16), 16);
+                 svgIcon(QStringLiteral(":/icons/icon_camera.svg"), kViewIconActive, 18), 18);
 
     auto *infoExpand = new QPushButton(m_screenInfoBar);
     infoExpand->setObjectName(QStringLiteral("MonitorChromeBtn"));
